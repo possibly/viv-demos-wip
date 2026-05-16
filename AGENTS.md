@@ -14,11 +14,22 @@ This initializes `viv/` (the `possibly/viv` fork, `browser/runtime` branch — g
 
 ## How it works
 
-Each demo has a `sim.viv` (Viv source) compiled to `bundle.json` via `vivc`. The browser loads both `bundle.json` and `shared/viv-runtime.js`, and the host app implements a `HostApplicationAdapter` that drives a `selectAction()` tick loop. See `demos/01-hello-world/main.js` for the full pattern.
+Each demo has a `sim.viv` (Viv source) compiled to `bundle.json` via `vivc`. At runtime, the browser and Node runner each load the bundle and inject a runtime object — the browser uses the browser bundle at `shared/viv-runtime.js`; Node uses the CJS build at `viv/runtimes/js/dist/index.cjs`.
 
 - `make compile` — recompile all demos
 - `make runtime` — rebuild `shared/viv-runtime.js` from `viv/`
-- `node scripts/run-sim.mjs <demo> [ticks] [seed]` — run a sim headlessly in Node and print tick-by-tick output. Use this to test `.viv` code without a browser. Each demo needs a `state.mjs` that exports `buildInitialState()` (see `demos/01-hello-world/state.mjs`).
+- `node scripts/run-sim.mjs <demo> [ticks] [seed]` — run a demo headlessly in Node, print tick-by-tick output. Use this to test `.viv` changes without a browser.
+
+## Demo convention
+
+Every demo has a `sim.mjs` that exports:
+
+- `runSim(runtime, bundle, seedStr, tickCount)` — full simulation loop; `runtime` is `{ initializeVivRuntime, selectAction, [attemptAction], EntityType }`
+- `summarize(tick)` — one-line string summary of a tick for Node output
+
+And a `main.js` that is a thin browser wrapper: fetch `bundle.json`, assemble the runtime object from the browser import, call `runSim`, render DOM. All sim logic lives in `sim.mjs` — `main.js` contains no logic.
+
+When adding a new demo, follow this split. The Node runner (`scripts/run-sim.mjs`) works automatically with any demo that has a conforming `sim.mjs`.
 
 ## Viv reference
 
