@@ -1,0 +1,160 @@
+// Promweek — one scene between Alex and Jordan
+// Social actions gated by relationship-derived precondition flags.
+// All effects are computed in JS (personality-modulated); Viv owns the
+// action vocabulary, precondition checks, and narrative gloss.
+
+// ── Alex's actions (player-controlled) ──────────────────────────────────────
+
+action small-talk:
+    gloss: "@alex makes small talk with @jordan"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+
+action compliment:
+    gloss: "@alex compliments @jordan"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+
+action ask-opinion:
+    gloss: "@alex asks @jordan for their opinion"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+
+action share-gossip:
+    gloss: "@alex leans in and shares some gossip with @jordan"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    conditions:
+        @alex.canGossip
+
+action flirt:
+    gloss: "@alex flirts with @jordan"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    conditions:
+        @alex.canFlirt
+
+action challenge-debate:
+    gloss: "@alex challenges @jordan to a debate"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    conditions:
+        @alex.canChallenge
+
+action ask-for-help:
+    gloss: "@alex asks @jordan for help"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    conditions:
+        @alex.canAskHelp
+
+action tease:
+    gloss: "@alex playfully teases @jordan"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    conditions:
+        @alex.canTease
+
+action apologize:
+    gloss: "@alex apologizes to @jordan"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    conditions:
+        @alex.canApologize
+
+action confide:
+    gloss: "@alex confides something personal in @jordan"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    conditions:
+        @alex.canConfide
+
+action invite-out:
+    gloss: "@alex invites @jordan somewhere"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    conditions:
+        @alex.canInviteOut
+
+action be-vulnerable:
+    gloss: "@alex opens up to @jordan"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    conditions:
+        @alex.canBeVulnerable
+
+// ── Jordan's reactions (JS-triggered) ───────────────────────────────────────
+
+reserved action jordan-warms-up:
+    gloss: "@jordan warms up to @alex"
+    roles:
+        @jordan:
+            as: initiator
+        @alex:
+            as: recipient
+    conditions:
+        @jordan.canWarmUp
+
+reserved action jordan-pulls-back:
+    gloss: "@jordan becomes guarded with @alex"
+    roles:
+        @jordan:
+            as: initiator
+        @alex:
+            as: recipient
+    conditions:
+        @jordan.canPullBack
+
+reserved action jordan-reciprocates:
+    gloss: "@jordan shows interest in @alex"
+    roles:
+        @jordan:
+            as: initiator
+        @alex:
+            as: recipient
+    conditions:
+        @jordan.canReciprocate
+
+reserved action jordan-neutral:
+    gloss: "@jordan continues talking with @alex"
+    roles:
+        @jordan:
+            as: initiator
+        @alex:
+            as: recipient
