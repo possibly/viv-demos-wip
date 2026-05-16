@@ -207,3 +207,12 @@ btnPrev.addEventListener("click", () => { if (currentTick > 0) { currentTick--; 
 btnNext.addEventListener("click", () => { if (currentTick < ticks.length - 1) { currentTick++; render(); } });
 seedInput.addEventListener("keydown", (e) => { if (e.key === "Enter") runSimulation(); });
 stepsInput.addEventListener("keydown", (e) => { if (e.key === "Enter") runSimulation(); });
+
+// Tab switching
+document.querySelectorAll(".tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    document.getElementById("tab-characters").hidden = btn.dataset.tab !== "characters";
+    document.getElementById("tab-chronicle").hidden = btn.dataset.tab !== "chronicle";
+  });
+});

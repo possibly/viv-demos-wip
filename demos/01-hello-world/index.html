@@ -15,11 +15,13 @@
 
   <main>
     <section class="setup">
-      <div class="setup-controls">
+      <div class="setup-row">
         <label for="seed-input">Seed</label>
         <input id="seed-input" type="text" value="hello-world" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="setup-row">
         <label for="steps-input">Steps</label>
-        <input id="steps-input" type="number" value="100" min="1" max="500">
+        <input id="steps-input" type="text" inputmode="numeric" pattern="[0-9]*" value="100">
         <button id="btn-run">Run</button>
       </div>
       <p id="status" class="status" hidden></p>
@@ -35,15 +37,16 @@
         <button id="btn-next" class="timeline-btn">Next →</button>
       </div>
 
-      <div class="sim-layout">
-        <div class="panel">
-          <h2>Characters</h2>
-          <div id="characters" class="char-grid"></div>
-        </div>
-        <div class="panel">
-          <h2>Events this tick</h2>
-          <div id="events" class="event-list"></div>
-        </div>
+      <div class="tab-bar">
+        <button class="tab-btn" data-tab="characters">Characters</button>
+        <button class="tab-btn active" data-tab="chronicle">Chronicle</button>
+      </div>
+
+      <div id="tab-characters" class="tab-pane" hidden>
+        <div id="characters" class="char-grid"></div>
+      </div>
+      <div id="tab-chronicle" class="tab-pane">
+        <div id="events" class="event-list"></div>
       </div>
     </section>
   </main>
