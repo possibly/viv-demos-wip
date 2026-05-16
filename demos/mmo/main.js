@@ -520,7 +520,7 @@ function renderModal(char) {
     </div>`;
 }
 
-function renderZonemap(currentLocationID) {
+function renderZonemap(currentLocationID, discoveredEnemies) {
   zonemapEl.innerHTML = "";
   for (const z of ZONES) {
     const el = document.createElement("div");
@@ -528,7 +528,19 @@ function renderZonemap(currentLocationID) {
     el.className = "zone-node" +
       (z.id === currentLocationID ? " active" : "") +
       (isDanger ? " danger" : "");
-    el.innerHTML = `<span class="zone-name">${z.name}</span><span class="zone-desc">${z.desc}</span>`;
+
+    const discovered = (discoveredEnemies?.[z.id] ?? [])
+      .map(id => ENEMY_TEMPLATES[id])
+      .filter(Boolean)
+      .sort((a, b) => a.level - b.level);
+
+    const enemyHTML = discovered.length > 0
+      ? `<div class="zone-enemies">${
+          discovered.map(e => `<span class="zone-enemy">${e.name} · Lv. ${e.level}</span>`).join("")
+        }</div>`
+      : "";
+
+    el.innerHTML = `<span class="zone-name">${z.name}</span><span class="zone-desc">${z.desc}</span>${enemyHTML}`;
     zonemapEl.appendChild(el);
   }
 }
@@ -542,7 +554,7 @@ function render() {
   btnNext.disabled = currentTick === simData.ticks.length - 1;
 
   renderCharCard(tick.character);
-  renderZonemap(tick.character.location);
+  renderZonemap(tick.character.location, tick.character.discoveredEnemies);
 
   if (!charModalEl.hidden) renderModal(tick.character);
 

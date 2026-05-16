@@ -241,6 +241,19 @@ main { padding: 1.25rem; max-width: 700px; }
   margin-top: 0.1rem;
   line-height: 1.35;
 }
+.zone-enemies {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin-top: 0.35rem;
+}
+.zone-enemy {
+  display: block;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: #b06060;
+}
+.zone-node.active .zone-enemy { color: #c87070; }
 
 /* Chronicle / events */
 .event-list {
