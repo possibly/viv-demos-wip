@@ -7,10 +7,45 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="app">
+  <header>
+    <a href="../../" class="back">← demos</a>
     <h1>Hello World</h1>
-    <div id="output"></div>
-  </div>
+    <p class="subtitle">Three characters in a tavern who greet each other.</p>
+  </header>
+
+  <main>
+    <section class="setup">
+      <div class="seed-row">
+        <label for="seed-input">Seed</label>
+        <input id="seed-input" type="text" value="hello-world" spellcheck="false" autocomplete="off">
+        <button id="btn-run">Run</button>
+      </div>
+      <p id="status" class="status" hidden></p>
+    </section>
+
+    <section id="sim-view" hidden>
+      <div class="timeline">
+        <button id="btn-prev" class="timeline-btn" disabled>← Prev</button>
+        <div class="timeline-info">
+          <span id="tick-label" class="tick-label"></span>
+          <span id="tick-time" class="tick-time"></span>
+        </div>
+        <button id="btn-next" class="timeline-btn">Next →</button>
+      </div>
+
+      <div class="sim-layout">
+        <div class="panel">
+          <h2>Characters</h2>
+          <div id="characters" class="char-grid"></div>
+        </div>
+        <div class="panel">
+          <h2>Events this tick</h2>
+          <div id="events" class="event-list"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
   <script type="module" src="main.js"></script>
 </body>
 </html>

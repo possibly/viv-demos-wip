@@ -1,25 +1,206 @@
 @import "../../shared/ui/shared.css";
 
-#app {
-  max-width: 600px;
-  margin: 4rem auto;
-  padding: 0 1.5rem;
+header {
+  padding: 2rem 2rem 1.5rem;
+  border-bottom: 1px solid var(--border);
 }
+
+.back {
+  display: inline-block;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+}
+.back:hover { color: var(--text); }
 
 h1 {
-  font-size: 1.75rem;
-  margin-bottom: 1.5rem;
+  font-size: 1.5rem;
   color: #fff;
+  margin-bottom: 0.25rem;
 }
 
-#output {
+.subtitle {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+main { padding: 1.5rem 2rem; max-width: 760px; }
+
+/* Setup row */
+.setup { margin-bottom: 2rem; }
+
+.seed-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.seed-row label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+#seed-input {
   font-family: var(--font-mono);
   font-size: 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.4rem 0.75rem;
+  color: var(--text);
+  width: 180px;
+  outline: none;
+}
+#seed-input:focus { border-color: #444; }
+
+#btn-run {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 0.4rem 1rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+#btn-run:hover { opacity: 0.85; }
+#btn-run:disabled { opacity: 0.4; cursor: default; }
+
+.status {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
   color: var(--text-muted);
-  line-height: 1.8;
+  font-family: var(--font-mono);
+}
+.status.error { color: #e06c6c; }
+
+/* Timeline */
+.timeline {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
 }
 
-#output .event {
-  padding: 0.2rem 0;
-  border-bottom: 1px solid var(--border);
+.timeline-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.timeline-btn:hover:not(:disabled) { border-color: #555; background: #222; }
+.timeline-btn:disabled { opacity: 0.35; cursor: default; }
+
+.timeline-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.tick-label {
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.tick-time {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* Sim layout */
+.sim-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+}
+
+.panel h2 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}
+
+/* Character cards */
+.char-grid { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.char-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.char-name { font-size: 0.9rem; }
+
+.char-mood {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.mood-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mood-bar {
+  width: 60px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.mood-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: #5a9e6f;
+  transition: width 0.25s ease;
+}
+
+.mood-val { font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted); }
+.mood-val.pos { color: #5a9e6f; }
+.mood-val.neg { color: #e06c6c; }
+
+/* Events */
+.event-list { display: flex; flex-direction: column; gap: 0.35rem; }
+
+.event-entry {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--text);
+  padding: 0.3rem 0.5rem;
+  background: var(--bg);
+  border-left: 2px solid var(--accent);
+  border-radius: 2px;
+}
+
+.event-entry.empty {
+  border-left-color: var(--border);
+  color: var(--text-muted);
+  font-style: italic;
 }

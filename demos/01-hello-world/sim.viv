@@ -1,2 +1,14 @@
-// Hello World simulation
-// TODO: replace with actual viv source
+// Hello World — minimal viv simulation
+// Three characters in a tavern who greet each other.
+// Each greeting raises both participants' mood by 10.
+
+action hello:
+    gloss: "@greeter says hello to @friend"
+    roles:
+        @greeter:
+            as: initiator
+        @friend:
+            as: recipient
+    effects:
+        @greeter.mood += 10
+        @friend.mood += 10
