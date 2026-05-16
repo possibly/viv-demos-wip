@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MMO · viv</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <a href="../../" class="back">← demos</a>
+    <h1>MMO Starter World</h1>
+    <p class="subtitle">A lone adventurer wanders through the starting lands.</p>
+  </header>
+
+  <main>
+    <section class="setup">
+      <div class="setup-row">
+        <label for="seed-input">Seed</label>
+        <input id="seed-input" type="text" value="greenvale" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="setup-row">
+        <label for="steps-input">Ticks</label>
+        <input id="steps-input" type="text" inputmode="numeric" pattern="[0-9]*" value="20">
+        <button id="btn-run">Enter World</button>
+      </div>
+      <p id="status" class="status" hidden></p>
+    </section>
+
+    <section id="sim-view" hidden>
+      <div id="char-card" class="char-card"></div>
+
+      <div class="timeline">
+        <button id="btn-prev" class="timeline-btn" disabled>← Prev</button>
+        <span id="tick-label" class="tick-label"></span>
+        <button id="btn-next" class="timeline-btn">Next →</button>
+      </div>
+
+      <div class="pane-grid">
+        <div class="pane">
+          <div class="pane-title">Greenvale</div>
+          <div id="zonemap" class="zonemap"></div>
+        </div>
+        <div class="pane">
+          <div class="pane-title">Chronicle</div>
+          <div id="events" class="event-list"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
