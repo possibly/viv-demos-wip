@@ -18,7 +18,6 @@ Each demo has a `sim.viv` (Viv source) compiled to `bundle.json` via `vivc`. The
 
 - `make compile` — recompile all demos
 - `make runtime` — rebuild `shared/viv-runtime.js` from `viv/`
-- `make serve` — serve on port 8080
 - `node scripts/run-sim.mjs <demo> [ticks] [seed]` — run a sim headlessly in Node and print tick-by-tick output. Use this to test `.viv` code without a browser. Each demo needs a `state.mjs` that exports `buildInitialState()` (see `demos/01-hello-world/state.mjs`).
 
 ## Viv reference
@@ -38,4 +37,3 @@ Skills in `.agents/skills/` are available as `/viv:<name>`:
 | `design` | Storyworld and action-set design |
 | `critique` | Reviewing `.viv` files |
 | `study` | Deep investigation of Viv source or behavior |
-| `setup` | Full Viv install walkthrough (not needed here — use `./scripts/setup.sh`) |
