@@ -81,15 +81,125 @@ const ZONES = [
   { id: "stillwater",   name: "Stillwater Mere",    desc: "A glittering lake that mirrors the sky. Scouts watch from the reed banks." },
 ];
 
+// --- Leveling ---
+// Cumulative XP required to reach each level (index 0 = level 1, index 5 = level 6 cap)
+const LEVEL_XP_MIN = [0, 300, 900, 2700, 6500, 14000];
+const LEVEL_CAP = 6;
+
+function getLevel(xp) {
+  for (let i = LEVEL_XP_MIN.length - 1; i >= 0; i--) {
+    if (xp >= LEVEL_XP_MIN[i]) return i + 1;
+  }
+  return 1;
+}
+
+// --- Enemy Faction ---
+const ENEMY_FACTION = { id: "grimspawn", name: "The Grimspawn" };
+
+// power level 1 = "basic" NPC tier
+const ENEMY_TEMPLATES = {
+  grimspawn_scout:    { id: "grimspawn_scout",    name: "Grimspawn Scout",    level: 1, powerLevel: 1, xpReward: 50 },
+  grimspawn_warrior:  { id: "grimspawn_warrior",  name: "Grimspawn Warrior",  level: 2, powerLevel: 1, xpReward: 100 },
+  grimspawn_enforcer: { id: "grimspawn_enforcer", name: "Grimspawn Enforcer", level: 3, powerLevel: 1, xpReward: 200 },
+};
+
+// Which enemy templates inhabit each zone (by zone id)
+const ZONE_ENEMIES = {
+  briar_edge: ["grimspawn_scout", "grimspawn_warrior"],
+  stonewick:  ["grimspawn_scout"],
+  stillwater: ["grimspawn_warrior", "grimspawn_enforcer"],
+};
+
+// --- Equipment ---
+// Standard MMO equipment slots; items carry { name, powerLevel }
+const EQUIPMENT_SLOTS = [
+  "head","neck","shoulders","chest","back","wrist","hands","waist","legs","feet",
+  "ring1","ring2","trinket","mainhand","offhand","ranged","ammo",
+];
+
+function getStarterEquipment(classKey, raceKey) {
+  const eq = Object.fromEntries(EQUIPMENT_SLOTS.map(s => [s, null]));
+
+  // Universal starter clothing
+  eq.chest = { name: "Starter Shirt",  powerLevel: 1 };
+  eq.legs  = { name: "Starter Pants",  powerLevel: 1 };
+  eq.feet  = { name: "Starter Shoes",  powerLevel: 1 };
+
+  switch (classKey) {
+    case "warrior":
+      if (raceKey === "orc") {
+        eq.mainhand = { name: "Starter Axe", powerLevel: 1 };
+      } else if (raceKey === "minotaur" || raceKey === "troll") {
+        eq.mainhand = { name: "Starter Greataxe", powerLevel: 1 };
+      } else {
+        // human, dwarf, elf, gnome, revenant → sword + shield
+        eq.mainhand = { name: "Starter Sword",  powerLevel: 1 };
+        eq.offhand  = { name: "Starter Shield", powerLevel: 1 };
+      }
+      break;
+    case "paladin":
+      eq.mainhand = { name: "Starter Sword",  powerLevel: 1 };
+      eq.offhand  = { name: "Starter Shield", powerLevel: 1 };
+      break;
+    case "hunter":
+      eq.mainhand = { name: "Starter Short Sword", powerLevel: 1 };
+      eq.ranged   = { name: "Starter Bow",         powerLevel: 1 };
+      eq.ammo     = { name: "Starter Arrows",      powerLevel: 1 };
+      break;
+    case "rogue":
+      eq.mainhand = { name: "Starter Dagger", powerLevel: 1 };
+      eq.offhand  = { name: "Starter Dagger", powerLevel: 1 };
+      break;
+    case "priest":
+      eq.mainhand = { name: "Starter Staff", powerLevel: 1 };
+      break;
+    case "mage":
+      eq.mainhand = { name: "Starter Wand", powerLevel: 1 };
+      eq.offhand  = { name: "Starter Tome", powerLevel: 1 };
+      break;
+    case "warlock":
+      eq.mainhand = { name: "Starter Wand",     powerLevel: 1 };
+      eq.offhand  = { name: "Starter Grimoire", powerLevel: 1 };
+      break;
+    case "druid":
+      eq.mainhand = { name: "Starter Staff", powerLevel: 1 };
+      break;
+    case "shaman":
+      eq.mainhand = { name: "Starter Mace",   powerLevel: 1 };
+      eq.offhand  = { name: "Starter Shield", powerLevel: 1 };
+      break;
+  }
+
+  return eq;
+}
+
+// --- Combat ---
+function getAvgEquipmentPower(char) {
+  const items = Object.values(char.equipment).filter(item => item !== null);
+  if (items.length === 0) return 1;
+  return items.reduce((sum, item) => sum + item.powerLevel, 0) / items.length;
+}
+
+// Win probability fitted to: equal level → 99%, +1 mob level → 95%,
+// +2 → 80%, +3 → 50%, +4 → 0%. Scores = level + power.
+function combatWinChance(playerLevel, avgEquipPower, enemyLevel, enemyPower) {
+  const diff = (playerLevel + avgEquipPower) - (enemyLevel + enemyPower);
+  const x = Math.max(0, Math.min(4, diff + 4));
+  if (x <= 0) return 0;
+  if (x >= 4) return 0.99;
+  // Quartic polynomial through (1,0.50), (2,0.80), (3,0.95), (4,0.99)
+  return -0.000417 * x ** 4 + 0.01083 * x ** 3 - 0.12957 * x ** 2 + 0.619157 * x;
+}
+
 function pickRandom(rng, arr) {
   return arr[Math.floor(rng() * arr.length)];
 }
 
 function generateCharacter(rng) {
-  const raceKey = pickRandom(rng, Object.keys(RACE_CLASS));
+  const raceKey  = pickRandom(rng, Object.keys(RACE_CLASS));
   const classKey = pickRandom(rng, RACE_CLASS[raceKey]);
-  const gender = rng() < 0.5 ? "m" : "f";
-  const name = pickRandom(rng, RACES[raceKey].names[gender]);
+  const gender   = rng() < 0.5 ? "m" : "f";
+  const name     = pickRandom(rng, RACES[raceKey].names[gender]);
   return {
     id: "adventurer",
     entityType: EntityType.Character,
@@ -100,6 +210,10 @@ function generateCharacter(rng) {
     faction: RACES[raceKey].faction,
     location: ZONES[0].id,
     memories: {},
+    level: 1,
+    xp: 0,
+    equipment: getStarterEquipment(classKey, raceKey),
+    factionRelationships: { [ENEMY_FACTION.id]: 50 },
   };
 }
 
@@ -171,16 +285,41 @@ async function runSim(seedStr, tickCount) {
   const char = structuredClone(state.entities["adventurer"]);
 
   for (let t = 0; t < tickCount; t++) {
-    const actionsBefore = new Set(state.actions);
-    await selectAction({ initiatorID: "adventurer" });
+    const adventurer = state.entities["adventurer"];
+    const enemiesHere = ZONE_ENEMIES[adventurer.location] ?? [];
+    const events = [];
+
+    if (enemiesHere.length > 0 && rng() < 0.5) {
+      // Combat — pick a random enemy template present in this zone
+      const templateId = pickRandom(rng, enemiesHere);
+      const enemy = ENEMY_TEMPLATES[templateId];
+      const avgPower = getAvgEquipmentPower(adventurer);
+      const winChance = combatWinChance(adventurer.level, avgPower, enemy.level, enemy.powerLevel);
+      const playerWins = rng() < winChance;
+
+      if (playerWins) {
+        const oldLevel = adventurer.level;
+        adventurer.xp = Math.min(adventurer.xp + enemy.xpReward, LEVEL_XP_MIN[LEVEL_CAP - 1] + enemy.xpReward);
+        adventurer.level = Math.min(getLevel(adventurer.xp), LEVEL_CAP);
+        events.push(`[Victory] ${adventurer.name} defeats a ${enemy.name}. (+${enemy.xpReward} XP)`);
+        if (adventurer.level > oldLevel) {
+          events.push(`[Level Up] ${adventurer.name} has reached level ${adventurer.level}!`);
+        }
+      } else {
+        events.push(`[Retreat] ${adventurer.name} is driven back by a ${enemy.name}.`);
+      }
+    } else {
+      // Wander to a new zone via Viv
+      const actionsBefore = new Set(state.actions);
+      await selectAction({ initiatorID: "adventurer" });
+      const newActionIDs = state.actions.filter((id) => !actionsBefore.has(id));
+      events.push(...newActionIDs.map((id) => {
+        const a = state.entities[id];
+        return a.report ?? a.gloss ?? "(action)";
+      }));
+    }
+
     state.timestamp += 10;
-
-    const newActionIDs = state.actions.filter((id) => !actionsBefore.has(id));
-    const events = newActionIDs.map((id) => {
-      const a = state.entities[id];
-      return a.report ?? a.gloss ?? "(action)";
-    });
-
     ticks.push({
       index: t,
       timestamp: state.timestamp,
@@ -197,22 +336,28 @@ async function runSim(seedStr, tickCount) {
 let simData = null;
 let currentTick = 0;
 
-const statusEl = document.getElementById("status");
-const simViewEl = document.getElementById("sim-view");
+const statusEl   = document.getElementById("status");
+const simViewEl  = document.getElementById("sim-view");
 const tickLabelEl = document.getElementById("tick-label");
-const btnPrev = document.getElementById("btn-prev");
-const btnNext = document.getElementById("btn-next");
-const btnRun = document.getElementById("btn-run");
-const eventsEl = document.getElementById("events");
-const seedInput = document.getElementById("seed-input");
+const btnPrev    = document.getElementById("btn-prev");
+const btnNext    = document.getElementById("btn-next");
+const btnRun     = document.getElementById("btn-run");
+const eventsEl   = document.getElementById("events");
+const seedInput  = document.getElementById("seed-input");
 const stepsInput = document.getElementById("steps-input");
 const charCardEl = document.getElementById("char-card");
-const zonemapEl = document.getElementById("zonemap");
+const zonemapEl  = document.getElementById("zonemap");
 
 function renderCharCard(char) {
   const cd = CLASS_DATA[char.class];
   const genderLabel = char.gender === "m" ? "Male" : "Female";
   const factionColor = char.faction === "Covenant" ? "#2a7dc9" : "#c42b2b";
+  const level = char.level ?? 1;
+  const xp = char.xp ?? 0;
+  const nextXP = level < LEVEL_CAP ? LEVEL_XP_MIN[level] : null;
+  const xpText = nextXP !== null ? `${xp} / ${nextXP} XP` : `${xp} XP (max)`;
+  const grimRel = char.factionRelationships?.[ENEMY_FACTION.id] ?? 50;
+
   charCardEl.innerHTML = `
     <div class="char-portrait" style="border-color: ${cd.color}">
       <span class="char-icon">${cd.icon}</span>
@@ -227,6 +372,8 @@ function renderCharCard(char) {
         <span>${genderLabel}</span>
       </div>
       <div class="char-faction" style="color:${factionColor}">${char.faction}</div>
+      <div class="char-level">Level ${level} · ${xpText}</div>
+      <div class="char-relations">${ENEMY_FACTION.name}: ${grimRel}</div>
     </div>`;
 }
 
@@ -234,7 +381,10 @@ function renderZonemap(currentLocationID) {
   zonemapEl.innerHTML = "";
   for (const z of ZONES) {
     const el = document.createElement("div");
-    el.className = "zone-node" + (z.id === currentLocationID ? " active" : "");
+    const isDanger = !!ZONE_ENEMIES[z.id];
+    el.className = "zone-node" +
+      (z.id === currentLocationID ? " active" : "") +
+      (isDanger ? " danger" : "");
     el.innerHTML = `<span class="zone-name">${z.name}</span><span class="zone-desc">${z.desc}</span>`;
     zonemapEl.appendChild(el);
   }
@@ -246,6 +396,7 @@ function render() {
   btnPrev.disabled = currentTick === 0;
   btnNext.disabled = currentTick === simData.ticks.length - 1;
 
+  renderCharCard(tick.character);
   renderZonemap(tick.character.location);
 
   eventsEl.innerHTML = "";
@@ -257,7 +408,9 @@ function render() {
   } else {
     for (const e of tick.events) {
       const el = document.createElement("div");
-      el.className = "event-entry";
+      const isVictory = e.startsWith("[Victory]") || e.startsWith("[Level Up]");
+      const isRetreat = e.startsWith("[Retreat]");
+      el.className = "event-entry" + (isVictory ? " victory" : isRetreat ? " retreat" : "");
       el.textContent = e;
       eventsEl.appendChild(el);
     }
@@ -271,7 +424,7 @@ function setStatus(msg, isError = false) {
 }
 
 async function runSimulation() {
-  const seedStr = seedInput.value.trim() || "greenvale";
+  const seedStr  = seedInput.value.trim() || "greenvale";
   const tickCount = Math.min(500, Math.max(1, parseInt(stepsInput.value, 10) || 20));
   btnRun.disabled = true;
   setStatus(`entering the world…`);
@@ -295,5 +448,5 @@ async function runSimulation() {
 btnRun.addEventListener("click", runSimulation);
 btnPrev.addEventListener("click", () => { if (currentTick > 0) { currentTick--; render(); } });
 btnNext.addEventListener("click", () => { if (currentTick < simData.ticks.length - 1) { currentTick++; render(); } });
-seedInput.addEventListener("keydown", (e) => { if (e.key === "Enter") runSimulation(); });
+seedInput.addEventListener("keydown",  (e) => { if (e.key === "Enter") runSimulation(); });
 stepsInput.addEventListener("keydown", (e) => { if (e.key === "Enter") runSimulation(); });
