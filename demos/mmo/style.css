@@ -135,6 +135,22 @@ main { padding: 1.25rem; max-width: 700px; }
   margin-top: 0.25rem;
   font-family: var(--font-mono);
 }
+.char-quest {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4em;
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
+}
+.quest-name {
+  color: #d4af37;
+  font-weight: 600;
+}
+.quest-phase {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
 
 /* Timeline */
 .timeline {
@@ -237,6 +253,14 @@ main { padding: 1.25rem; max-width: 700px; }
   color: #b06060;
 }
 .zone-node.active .zone-enemy { color: #c87070; }
+.zone-quest-giver { margin-top: 0.2rem; }
+.zone-npc {
+  display: block;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: #d4af37;
+}
+.zone-node.active .zone-npc { color: #f0c040; }
 
 /* Chronicle / events */
 .event-list {
@@ -255,6 +279,7 @@ main { padding: 1.25rem; max-width: 700px; }
 .event-entry.victory  { color: #7ec880; }
 .event-entry.retreat  { color: #c07070; }
 .event-entry.scouting { color: #8ab8d4; }
+.event-entry.quest    { color: #d4af37; }
 
 /* Modal */
 .modal {
