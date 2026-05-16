@@ -82,7 +82,7 @@ const ZONES = [
 ];
 
 // --- Leveling ---
-// Cumulative XP required to reach each level (index 0 = level 1, index 5 = level 6 cap)
+// Cumulative XP required to reach each level (index = level - 1)
 const LEVEL_XP_MIN = [0, 300, 900, 2700, 6500, 14000];
 const LEVEL_CAP = 6;
 
@@ -93,17 +93,28 @@ function getLevel(xp) {
   return 1;
 }
 
-// --- Enemy Faction ---
-const ENEMY_FACTION = { id: "grimspawn", name: "The Grimspawn" };
+// --- Factions ---
+// type "enemy": initial rep 0 on first contact; type "neutral": initial rep 50
+const ENEMY_FACTION = { id: "grimspawn", name: "The Grimspawn", type: "enemy" };
 
-// power level 1 = "basic" NPC tier
-const ENEMY_TEMPLATES = {
-  grimspawn_scout:    { id: "grimspawn_scout",    name: "Grimspawn Scout",    level: 1, powerLevel: 1, xpReward: 50 },
-  grimspawn_warrior:  { id: "grimspawn_warrior",  name: "Grimspawn Warrior",  level: 2, powerLevel: 1, xpReward: 100 },
-  grimspawn_enforcer: { id: "grimspawn_enforcer", name: "Grimspawn Enforcer", level: 3, powerLevel: 1, xpReward: 200 },
+const FACTIONS = {
+  [ENEMY_FACTION.id]: ENEMY_FACTION,
 };
 
-// Which enemy templates inhabit each zone (by zone id)
+function initialFactionRep(factionId) {
+  return FACTIONS[factionId]?.type === "enemy" ? 0 : 50;
+}
+
+// --- Enemy NPC templates ---
+// power level 1 = "basic" tier
+// discoveryRate: probability (0–1) of spotting this enemy on a look-around attempt
+const ENEMY_TEMPLATES = {
+  grimspawn_scout:    { id: "grimspawn_scout",    name: "Grimspawn Scout",    faction: ENEMY_FACTION.id, level: 1, powerLevel: 1, xpReward: 50,  discoveryRate: 1.0 },
+  grimspawn_warrior:  { id: "grimspawn_warrior",  name: "Grimspawn Warrior",  faction: ENEMY_FACTION.id, level: 2, powerLevel: 1, xpReward: 100, discoveryRate: 1.0 },
+  grimspawn_enforcer: { id: "grimspawn_enforcer", name: "Grimspawn Enforcer", faction: ENEMY_FACTION.id, level: 3, powerLevel: 1, xpReward: 200, discoveryRate: 1.0 },
+};
+
+// Enemy templates that inhabit each zone; absent = safe zone
 const ZONE_ENEMIES = {
   briar_edge: ["grimspawn_scout", "grimspawn_warrior"],
   stonewick:  ["grimspawn_scout"],
@@ -111,19 +122,25 @@ const ZONE_ENEMIES = {
 };
 
 // --- Equipment ---
-// Standard MMO equipment slots; items carry { name, powerLevel }
 const EQUIPMENT_SLOTS = [
   "head","neck","shoulders","chest","back","wrist","hands","waist","legs","feet",
   "ring1","ring2","trinket","mainhand","offhand","ranged","ammo",
 ];
 
+const SLOT_LABELS = {
+  head: "Head", neck: "Neck", shoulders: "Shoulders", chest: "Chest",
+  back: "Back", wrist: "Wrist", hands: "Hands", waist: "Waist",
+  legs: "Legs", feet: "Feet", ring1: "Ring", ring2: "Ring 2",
+  trinket: "Trinket", mainhand: "Main Hand", offhand: "Off Hand",
+  ranged: "Ranged", ammo: "Ammo",
+};
+
 function getStarterEquipment(classKey, raceKey) {
   const eq = Object.fromEntries(EQUIPMENT_SLOTS.map(s => [s, null]));
 
-  // Universal starter clothing
-  eq.chest = { name: "Starter Shirt",  powerLevel: 1 };
-  eq.legs  = { name: "Starter Pants",  powerLevel: 1 };
-  eq.feet  = { name: "Starter Shoes",  powerLevel: 1 };
+  eq.chest = { name: "Starter Shirt", powerLevel: 1 };
+  eq.legs  = { name: "Starter Pants", powerLevel: 1 };
+  eq.feet  = { name: "Starter Shoes", powerLevel: 1 };
 
   switch (classKey) {
     case "warrior":
@@ -132,7 +149,6 @@ function getStarterEquipment(classKey, raceKey) {
       } else if (raceKey === "minotaur" || raceKey === "troll") {
         eq.mainhand = { name: "Starter Greataxe", powerLevel: 1 };
       } else {
-        // human, dwarf, elf, gnome, revenant → sword + shield
         eq.mainhand = { name: "Starter Sword",  powerLevel: 1 };
         eq.offhand  = { name: "Starter Shield", powerLevel: 1 };
       }
@@ -181,13 +197,12 @@ function getAvgEquipmentPower(char) {
 }
 
 // Win probability fitted to: equal level → 99%, +1 mob level → 95%,
-// +2 → 80%, +3 → 50%, +4 → 0%. Scores = level + power.
+// +2 → 80%, +3 → 50%, +4 → 0%. Scores = level + avg power.
 function combatWinChance(playerLevel, avgEquipPower, enemyLevel, enemyPower) {
   const diff = (playerLevel + avgEquipPower) - (enemyLevel + enemyPower);
   const x = Math.max(0, Math.min(4, diff + 4));
   if (x <= 0) return 0;
   if (x >= 4) return 0.99;
-  // Quartic polynomial through (1,0.50), (2,0.80), (3,0.95), (4,0.99)
   return -0.000417 * x ** 4 + 0.01083 * x ** 3 - 0.12957 * x ** 2 + 0.619157 * x;
 }
 
@@ -213,7 +228,8 @@ function generateCharacter(rng) {
     level: 1,
     xp: 0,
     equipment: getStarterEquipment(classKey, raceKey),
-    factionRelationships: { [ENEMY_FACTION.id]: 50 },
+    factionRelationships: {},   // factions are unknown until first contact
+    discoveredEnemies: {},      // zone id → array of discovered template ids
   };
 }
 
@@ -286,12 +302,22 @@ async function runSim(seedStr, tickCount) {
 
   for (let t = 0; t < tickCount; t++) {
     const adventurer = state.entities["adventurer"];
-    const enemiesHere = ZONE_ENEMIES[adventurer.location] ?? [];
+    const locationID = adventurer.location;
+    const zoneName = ZONES.find(z => z.id === locationID)?.name ?? locationID;
+    const allEnemiesHere = ZONE_ENEMIES[locationID] ?? [];
+    const discoveredHere = adventurer.discoveredEnemies[locationID] ?? [];
+    const undiscoveredHere = allEnemiesHere.filter(id => !discoveredHere.includes(id));
+
+    // Available actions depend on what's been discovered in this zone
+    const availableActions = ["wander"];
+    if (discoveredHere.length > 0) availableActions.push("fight");
+    if (undiscoveredHere.length > 0) availableActions.push("look_around");
+
+    const action = pickRandom(rng, availableActions);
     const events = [];
 
-    if (enemiesHere.length > 0 && rng() < 0.5) {
-      // Combat — pick a random enemy template present in this zone
-      const templateId = pickRandom(rng, enemiesHere);
+    if (action === "fight") {
+      const templateId = pickRandom(rng, discoveredHere);
       const enemy = ENEMY_TEMPLATES[templateId];
       const avgPower = getAvgEquipmentPower(adventurer);
       const winChance = combatWinChance(adventurer.level, avgPower, enemy.level, enemy.powerLevel);
@@ -308,8 +334,33 @@ async function runSim(seedStr, tickCount) {
       } else {
         events.push(`[Retreat] ${adventurer.name} is driven back by a ${enemy.name}.`);
       }
+
+    } else if (action === "look_around") {
+      const foundId = pickRandom(rng, undiscoveredHere);
+      const enemy = ENEMY_TEMPLATES[foundId];
+      if (rng() < enemy.discoveryRate) {
+
+        if (!adventurer.discoveredEnemies[locationID]) {
+          adventurer.discoveredEnemies[locationID] = [];
+        }
+        adventurer.discoveredEnemies[locationID].push(foundId);
+
+        const factionId = enemy.faction;
+        const newFaction = !(factionId in adventurer.factionRelationships);
+        if (newFaction) {
+          adventurer.factionRelationships[factionId] = initialFactionRep(factionId);
+        }
+
+        const factionNote = newFaction
+          ? ` ${FACTIONS[factionId]?.name ?? factionId} added to known factions.`
+          : "";
+        events.push(`[Scouting] ${adventurer.name} spots a level ${enemy.level} ${enemy.name} in ${zoneName}.${factionNote}`);
+      } else {
+        events.push(`[Scouting] ${adventurer.name} searches ${zoneName} but finds nothing unusual.`);
+      }
+
     } else {
-      // Wander to a new zone via Viv
+      // Wander via Viv
       const actionsBefore = new Set(state.actions);
       await selectAction({ initiatorID: "adventurer" });
       const newActionIDs = state.actions.filter((id) => !actionsBefore.has(id));
@@ -335,18 +386,29 @@ async function runSim(seedStr, tickCount) {
 
 let simData = null;
 let currentTick = 0;
+let currentDisplayChar = null;
 
-const statusEl   = document.getElementById("status");
-const simViewEl  = document.getElementById("sim-view");
+const statusEl    = document.getElementById("status");
+const simViewEl   = document.getElementById("sim-view");
 const tickLabelEl = document.getElementById("tick-label");
-const btnPrev    = document.getElementById("btn-prev");
-const btnNext    = document.getElementById("btn-next");
-const btnRun     = document.getElementById("btn-run");
-const eventsEl   = document.getElementById("events");
-const seedInput  = document.getElementById("seed-input");
-const stepsInput = document.getElementById("steps-input");
-const charCardEl = document.getElementById("char-card");
-const zonemapEl  = document.getElementById("zonemap");
+const btnPrev     = document.getElementById("btn-prev");
+const btnNext     = document.getElementById("btn-next");
+const btnRun      = document.getElementById("btn-run");
+const eventsEl    = document.getElementById("events");
+const seedInput   = document.getElementById("seed-input");
+const stepsInput  = document.getElementById("steps-input");
+const charCardEl  = document.getElementById("char-card");
+const zonemapEl   = document.getElementById("zonemap");
+const charModalEl = document.getElementById("char-modal");
+const modalBodyEl = document.getElementById("modal-body");
+
+function factionStanding(rep) {
+  if (rep <= 10)  return { label: "Hostile",     cls: "standing-hostile" };
+  if (rep <= 25)  return { label: "Unfriendly",  cls: "standing-unfriendly" };
+  if (rep <= 60)  return { label: "Neutral",     cls: "standing-neutral" };
+  if (rep <= 80)  return { label: "Friendly",    cls: "standing-friendly" };
+  return            { label: "Honored",      cls: "standing-honored" };
+}
 
 function renderCharCard(char) {
   const cd = CLASS_DATA[char.class];
@@ -356,7 +418,6 @@ function renderCharCard(char) {
   const xp = char.xp ?? 0;
   const nextXP = level < LEVEL_CAP ? LEVEL_XP_MIN[level] : null;
   const xpText = nextXP !== null ? `${xp} / ${nextXP} XP` : `${xp} XP (max)`;
-  const grimRel = char.factionRelationships?.[ENEMY_FACTION.id] ?? 50;
 
   charCardEl.innerHTML = `
     <div class="char-portrait" style="border-color: ${cd.color}">
@@ -373,7 +434,89 @@ function renderCharCard(char) {
       </div>
       <div class="char-faction" style="color:${factionColor}">${char.faction}</div>
       <div class="char-level">Level ${level} · ${xpText}</div>
-      <div class="char-relations">${ENEMY_FACTION.name}: ${grimRel}</div>
+    </div>
+    <div class="char-card-hint">click for details</div>`;
+}
+
+function renderModal(char) {
+  const cd = CLASS_DATA[char.class];
+  const factionColor = char.faction === "Covenant" ? "#2a7dc9" : "#c42b2b";
+  const genderLabel  = char.gender === "m" ? "Male" : "Female";
+  const level = char.level ?? 1;
+  const xp    = char.xp ?? 0;
+  const nextXP = level < LEVEL_CAP ? LEVEL_XP_MIN[level] : null;
+  const xpText = nextXP !== null ? `${xp} / ${nextXP}` : `${xp} (max)`;
+  const className = char.class.charAt(0).toUpperCase() + char.class.slice(1);
+
+  const statsRows = [
+    ["Class",   `<span style="color:${cd.color}">${className}</span>`],
+    ["Race",    RACE_LABELS[char.race]],
+    ["Gender",  genderLabel],
+    ["Faction", `<span style="color:${factionColor}">${char.faction}</span>`],
+    ["Level",   String(level)],
+    ["XP",      xpText],
+  ].map(([k, v]) => `<tr><td class="col-label">${k}</td><td>${v}</td></tr>`).join("");
+
+  const equipRows = EQUIPMENT_SLOTS.map(slot => {
+    const item  = char.equipment[slot];
+    const label = SLOT_LABELS[slot];
+    if (!item) {
+      return `<tr><td class="col-label col-muted">${label}</td><td class="col-muted">—</td><td class="col-power col-muted">—</td></tr>`;
+    }
+    return `<tr><td class="col-label">${label}</td><td>${item.name}</td><td class="col-power">${item.powerLevel}</td></tr>`;
+  }).join("");
+
+  const knownFactions = Object.entries(char.factionRelationships ?? {});
+  const factionRows = knownFactions.length === 0
+    ? `<tr><td colspan="3" class="col-muted" style="font-style:italic">None discovered yet</td></tr>`
+    : knownFactions.map(([factionId, rep]) => {
+        const name = FACTIONS[factionId]?.name ?? factionId;
+        const { label, cls } = factionStanding(rep);
+        return `<tr>
+          <td class="col-label">${name}</td>
+          <td class="${cls}">${label}</td>
+          <td class="col-power ${cls}">${rep}</td>
+        </tr>`;
+      }).join("");
+
+  const factionHead = knownFactions.length > 0
+    ? `<thead><tr><td class="col-label col-head">Faction</td><td class="col-head">Standing</td><td class="col-power col-head">Rep</td></tr></thead>`
+    : "";
+
+  modalBodyEl.innerHTML = `
+    <div class="modal-char-header">
+      <div class="char-portrait" style="border-color:${cd.color}; width:48px; height:48px">
+        <span class="char-icon" style="font-size:1.4rem">${cd.icon}</span>
+      </div>
+      <div>
+        <div class="char-name">${char.name}</div>
+        <div class="modal-char-sub">Level ${level} <span style="color:${cd.color}">${className}</span></div>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">Character</div>
+      <table class="modal-table"><tbody>${statsRows}</tbody></table>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">Equipment</div>
+      <table class="modal-table">
+        <thead><tr>
+          <td class="col-label col-head">Slot</td>
+          <td class="col-head">Item</td>
+          <td class="col-power col-head">Power</td>
+        </tr></thead>
+        <tbody>${equipRows}</tbody>
+      </table>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">Known Factions</div>
+      <table class="modal-table">
+        ${factionHead}
+        <tbody>${factionRows}</tbody>
+      </table>
     </div>`;
 }
 
@@ -392,12 +535,16 @@ function renderZonemap(currentLocationID) {
 
 function render() {
   const tick = simData.ticks[currentTick];
+  currentDisplayChar = tick.character;
+
   tickLabelEl.textContent = `Tick ${currentTick + 1} / ${simData.ticks.length}`;
   btnPrev.disabled = currentTick === 0;
   btnNext.disabled = currentTick === simData.ticks.length - 1;
 
   renderCharCard(tick.character);
   renderZonemap(tick.character.location);
+
+  if (!charModalEl.hidden) renderModal(tick.character);
 
   eventsEl.innerHTML = "";
   if (tick.events.length === 0) {
@@ -410,7 +557,11 @@ function render() {
       const el = document.createElement("div");
       const isVictory = e.startsWith("[Victory]") || e.startsWith("[Level Up]");
       const isRetreat = e.startsWith("[Retreat]");
-      el.className = "event-entry" + (isVictory ? " victory" : isRetreat ? " retreat" : "");
+      const isScouting = e.startsWith("[Scouting]");
+      el.className = "event-entry" +
+        (isVictory  ? " victory"  :
+         isRetreat  ? " retreat"  :
+         isScouting ? " scouting" : "");
       el.textContent = e;
       eventsEl.appendChild(el);
     }
@@ -424,15 +575,17 @@ function setStatus(msg, isError = false) {
 }
 
 async function runSimulation() {
-  const seedStr  = seedInput.value.trim() || "greenvale";
+  const seedStr   = seedInput.value.trim() || "greenvale";
   const tickCount = Math.min(500, Math.max(1, parseInt(stepsInput.value, 10) || 20));
   btnRun.disabled = true;
   setStatus(`entering the world…`);
   simViewEl.hidden = true;
+  charModalEl.hidden = true;
   cachedBundle = null;
   try {
     simData = await runSim(seedStr, tickCount);
     currentTick = 0;
+    currentDisplayChar = simData.character;
     renderCharCard(simData.character);
     simViewEl.hidden = false;
     render();
@@ -444,6 +597,25 @@ async function runSimulation() {
     btnRun.disabled = false;
   }
 }
+
+// --- Modal ---
+charCardEl.addEventListener("click", () => {
+  if (!currentDisplayChar) return;
+  renderModal(currentDisplayChar);
+  charModalEl.hidden = false;
+});
+
+document.getElementById("modal-backdrop").addEventListener("click", () => {
+  charModalEl.hidden = true;
+});
+
+document.getElementById("modal-close").addEventListener("click", () => {
+  charModalEl.hidden = true;
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !charModalEl.hidden) charModalEl.hidden = true;
+});
 
 btnRun.addEventListener("click", runSimulation);
 btnPrev.addEventListener("click", () => { if (currentTick > 0) { currentTick--; render(); } });
