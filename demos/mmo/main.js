@@ -1,4 +1,4 @@
-import { initializeVivRuntime, selectAction, EntityType } from "../../shared/viv-runtime.js";
+import { initializeVivRuntime, selectAction, attemptAction, EntityType } from "../../shared/viv-runtime.js";
 
 // --- Seeded PRNG (mulberry32) ---
 function mulberry32(seed) {
@@ -308,15 +308,20 @@ async function runSim(seedStr, tickCount) {
     const discoveredHere = adventurer.discoveredEnemies[locationID] ?? [];
     const undiscoveredHere = allEnemiesHere.filter(id => !discoveredHere.includes(id));
 
-    // Available actions depend on what's been discovered in this zone
-    const availableActions = ["wander"];
-    if (discoveredHere.length > 0) availableActions.push("fight");
-    if (undiscoveredHere.length > 0) availableActions.push("look_around");
+    // Expose precondition flags to viv so the pick-activity selector can gate fight/look-around.
+    adventurer.canFight = discoveredHere.length > 0;
+    adventurer.canScout = undiscoveredHere.length > 0;
 
-    const action = pickRandom(rng, availableActions);
     const events = [];
 
-    if (action === "fight") {
+    // Viv's pick-activity selector picks wander / fight / look-around with equal weight,
+    // skipping any option whose conditions are unmet.
+    const actionsBefore = new Set(state.actions);
+    await selectAction({ initiatorID: "adventurer" });
+    const newActionIDs = state.actions.filter(id => !actionsBefore.has(id));
+    const selectedActionName = newActionIDs.length > 0 ? state.entities[newActionIDs[0]].name : null;
+
+    if (selectedActionName === "fight") {
       const templateId = pickRandom(rng, discoveredHere);
       const enemy = ENEMY_TEMPLATES[templateId];
       const avgPower = getAvgEquipmentPower(adventurer);
@@ -329,17 +334,18 @@ async function runSim(seedStr, tickCount) {
         adventurer.level = Math.min(getLevel(adventurer.xp), LEVEL_CAP);
         events.push(`[Victory] ${adventurer.name} defeats a ${enemy.name}. (+${enemy.xpReward} XP)`);
         if (adventurer.level > oldLevel) {
+          // level-up is a reserved viv action; fire it immediately as a consequence of the fight.
+          await attemptAction({ actionName: "level-up", initiatorID: "adventurer", suppressConditions: true });
           events.push(`[Level Up] ${adventurer.name} has reached level ${adventurer.level}!`);
         }
       } else {
         events.push(`[Retreat] ${adventurer.name} is driven back by a ${enemy.name}.`);
       }
 
-    } else if (action === "look_around") {
+    } else if (selectedActionName === "look-around") {
       const foundId = pickRandom(rng, undiscoveredHere);
       const enemy = ENEMY_TEMPLATES[foundId];
       if (rng() < enemy.discoveryRate) {
-
         if (!adventurer.discoveredEnemies[locationID]) {
           adventurer.discoveredEnemies[locationID] = [];
         }
@@ -360,11 +366,8 @@ async function runSim(seedStr, tickCount) {
       }
 
     } else {
-      // Wander via Viv
-      const actionsBefore = new Set(state.actions);
-      await selectAction({ initiatorID: "adventurer" });
-      const newActionIDs = state.actions.filter((id) => !actionsBefore.has(id));
-      events.push(...newActionIDs.map((id) => {
+      // wander: viv already changed adventurer.location via its effect; just surface the gloss.
+      events.push(...newActionIDs.map(id => {
         const a = state.entities[id];
         return a.report ?? a.gloss ?? "(action)";
       }));

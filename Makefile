@@ -6,7 +6,7 @@ runtime:
 
 compile:
 	for d in demos/*/; do \
-		viv/compiler/compile $$d/sim.viv > $$d/bundle.json; \
+		vivc -i $$d/sim.viv -o $$d/bundle.json; \
 	done
 
 serve:

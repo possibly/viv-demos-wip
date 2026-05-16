@@ -1,7 +1,8 @@
-// MMO Starter World — a lone adventurer wanders through the starting lands.
-// Each tick the adventurer moves to a new subzone.
+// MMO Starter World — each tick, the adventurer's activity is chosen by the pick-activity selector.
+// fight is gated on having discovered enemies in the current zone; look-around requires undiscovered ones.
+// level-up fires immediately as a reserved action when the sim awards a new level.
 
-action wander:
+reserved action wander:
     gloss: "@adventurer wanders into @destination"
     roles:
         @adventurer:
@@ -12,3 +13,34 @@ action wander:
         @destination != @adventurer.location
     effects:
         @adventurer.location = @destination
+
+reserved action fight:
+    gloss: "@adventurer engages in combat"
+    roles:
+        @adventurer:
+            as: initiator
+    conditions:
+        @adventurer.canFight
+
+reserved action look-around:
+    gloss: "@adventurer scouts the area"
+    roles:
+        @adventurer:
+            as: initiator
+    conditions:
+        @adventurer.canScout
+
+reserved action level-up:
+    gloss: "@adventurer reaches a new level"
+    roles:
+        @adventurer:
+            as: initiator
+
+action-selector pick-activity:
+    roles:
+        @adventurer:
+            as: initiator
+    target with weights:
+        (1) wander;
+        (1) fight;
+        (1) look-around;
