@@ -262,20 +262,21 @@ async function runSim(seedStr, tickCount) {
 
   // --- Enemy entity helpers ---
 
-  // Returns the id of the first living enemy on a zone's stack, or null if none.
-  function firstAliveEnemy(zoneId) {
+  // Returns the id of the first living enemy of a specific template on a zone's stack, or null.
+  function firstAliveEnemyOfTemplate(zoneId, templateId) {
     for (const id of state.zoneEnemyStacks[zoneId] ?? []) {
-      if (state.entities[id]?.alive) return id;
+      const e = state.entities[id];
+      if (e?.alive && e.templateId === templateId) return id;
     }
     return null;
   }
 
-  // Spawns a new enemy entity from the given template at zoneId, pushes it onto that zone's stack.
+  // Spawns a new enemy character entity from the given template at zoneId, pushes it onto the stack.
   function spawnEnemy(templateId, zoneId) {
     const template = ENEMY_TEMPLATES[templateId];
     const id = makeUUID(rng);
     state.entities[id] = {
-      entityType: EntityType.Item,
+      entityType: EntityType.Character,
       id,
       name: template.name,
       location: zoneId,
@@ -285,8 +286,9 @@ async function runSim(seedStr, tickCount) {
       xpReward: template.xpReward,
       templateId,
       faction: template.faction,
+      memories: {},
     };
-    state.items.push(id);
+    state.characters.push(id);
     if (!state.zoneEnemyStacks[zoneId]) state.zoneEnemyStacks[zoneId] = [];
     state.zoneEnemyStacks[zoneId].push(id);
     return id;
@@ -356,11 +358,12 @@ async function runSim(seedStr, tickCount) {
     const selectedActionName = newActionIDs.length > 0 ? state.entities[newActionIDs[0]].name : null;
 
     if (selectedActionName === "fight") {
-      // Reuse an existing living enemy at this zone, or spawn a fresh one from a discovered template.
-      let enemyId = firstAliveEnemy(locationID);
-      if (!enemyId) {
-        enemyId = spawnEnemy(pickRandom(rng, discoveredHere), locationID);
-      }
+      // The player picks a known (scouted) enemy type to fight. If a living instance of that
+      // template is already on the zone's stack, that same entity is reused; otherwise a new
+      // one is spawned, giving it persistence across encounters.
+      const templateId = pickRandom(rng, discoveredHere);
+      let enemyId = firstAliveEnemyOfTemplate(locationID, templateId);
+      if (!enemyId) enemyId = spawnEnemy(templateId, locationID);
       const enemy = state.entities[enemyId];
 
       const avgPower = getAvgEquipmentPower(adventurer);

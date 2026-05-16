@@ -29,7 +29,7 @@ reserved action kill:
         @adventurer:
             as: initiator
         @enemy:
-            as: item
+            as: recipient
     effects:
         @adventurer.xp += @adventurer.pendingXpReward
         @enemy.alive = false
@@ -40,7 +40,7 @@ reserved action retreat:
         @adventurer:
             as: initiator
         @enemy:
-            as: item
+            as: recipient
 
 reserved action look-around:
     gloss: "@adventurer scouts the area"
