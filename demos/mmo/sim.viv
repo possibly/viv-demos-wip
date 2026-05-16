@@ -1,0 +1,14 @@
+// MMO Starter World — a lone adventurer wanders through the starting lands.
+// Each tick the adventurer moves to a new subzone.
+
+action wander:
+    gloss: "@adventurer wanders into @destination"
+    roles:
+        @adventurer:
+            as: initiator
+        @destination:
+            as: location, anywhere
+    conditions:
+        @destination != @adventurer.location
+    effects:
+        @adventurer.location = @destination
