@@ -1,6 +1,6 @@
 // MMO Starter World — each tick, the adventurer's activity is chosen by the pick-activity selector.
 // fight is gated on having discovered enemies in the current zone; look-around requires undiscovered ones.
-// level-up fires immediately as a reserved action when the sim awards a new level.
+// kill, retreat, and level-up fire immediately as reserved actions on the same timestep as fight.
 
 reserved action wander:
     gloss: "@adventurer wanders into @destination"
@@ -15,12 +15,26 @@ reserved action wander:
         @adventurer.location = @destination
 
 reserved action fight:
-    gloss: "@adventurer engages in combat"
+    gloss: "@adventurer seeks a fight"
     roles:
         @adventurer:
             as: initiator
     conditions:
         @adventurer.canFight
+
+reserved action kill:
+    gloss: "@adventurer slays the {@adventurer.foeName} (+{@adventurer.pendingXpReward} XP)"
+    roles:
+        @adventurer:
+            as: initiator
+    effects:
+        @adventurer.xp += @adventurer.pendingXpReward
+
+reserved action retreat:
+    gloss: "@adventurer is driven back by the {@adventurer.foeName}"
+    roles:
+        @adventurer:
+            as: initiator
 
 reserved action look-around:
     gloss: "@adventurer scouts the area"
@@ -31,7 +45,7 @@ reserved action look-around:
         @adventurer.canScout
 
 reserved action level-up:
-    gloss: "@adventurer reaches a new level"
+    gloss: "@adventurer reaches level {@adventurer.level}"
     roles:
         @adventurer:
             as: initiator

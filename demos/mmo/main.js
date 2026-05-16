@@ -312,6 +312,7 @@ async function runSim(seedStr, tickCount) {
     adventurer.canFight = discoveredHere.length > 0;
     adventurer.canScout = undiscoveredHere.length > 0;
 
+    // events is [{text, type}] — type maps to a CSS class on the entry
     const events = [];
 
     // Viv's pick-activity selector picks wander / fight / look-around with equal weight,
@@ -328,18 +329,41 @@ async function runSim(seedStr, tickCount) {
       const winChance = combatWinChance(adventurer.level, avgPower, enemy.level, enemy.powerLevel);
       const playerWins = rng() < winChance;
 
+      // Store enemy context so viv can use it in kill/retreat glosses and the kill XP effect.
+      adventurer.foeName = enemy.name;
+      adventurer.foeLevel = enemy.level;
+      // Cap the reward so xp never exceeds the max level threshold.
+      const xpCap = LEVEL_XP_MIN[LEVEL_CAP - 1];
+      adventurer.pendingXpReward = Math.min(enemy.xpReward, Math.max(0, xpCap - adventurer.xp));
+
       if (playerWins) {
         const oldLevel = adventurer.level;
-        adventurer.xp = Math.min(adventurer.xp + enemy.xpReward, LEVEL_XP_MIN[LEVEL_CAP - 1] + enemy.xpReward);
-        adventurer.level = Math.min(getLevel(adventurer.xp), LEVEL_CAP);
-        events.push(`[Victory] ${adventurer.name} defeats a ${enemy.name}. (+${enemy.xpReward} XP)`);
-        if (adventurer.level > oldLevel) {
-          // level-up is a reserved viv action; fire it immediately as a consequence of the fight.
+        // kill records itself in viv and applies the XP gain via its effect.
+        const killBefore = new Set(state.actions);
+        await attemptAction({ actionName: "kill", initiatorID: "adventurer", suppressConditions: true });
+        state.actions.filter(id => !killBefore.has(id)).forEach(id => {
+          const a = state.entities[id];
+          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
+        });
+
+        // level-up fires immediately as a reserved viv action when the sim awards a new level.
+        const newLevel = Math.min(getLevel(adventurer.xp), LEVEL_CAP);
+        if (newLevel > oldLevel) {
+          adventurer.level = newLevel;
+          const levelBefore = new Set(state.actions);
           await attemptAction({ actionName: "level-up", initiatorID: "adventurer", suppressConditions: true });
-          events.push(`[Level Up] ${adventurer.name} has reached level ${adventurer.level}!`);
+          state.actions.filter(id => !levelBefore.has(id)).forEach(id => {
+            const a = state.entities[id];
+            events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
+          });
         }
       } else {
-        events.push(`[Retreat] ${adventurer.name} is driven back by a ${enemy.name}.`);
+        const retreatBefore = new Set(state.actions);
+        await attemptAction({ actionName: "retreat", initiatorID: "adventurer", suppressConditions: true });
+        state.actions.filter(id => !retreatBefore.has(id)).forEach(id => {
+          const a = state.entities[id];
+          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "retreat" });
+        });
       }
 
     } else if (selectedActionName === "look-around") {
@@ -360,17 +384,17 @@ async function runSim(seedStr, tickCount) {
         const factionNote = newFaction
           ? ` ${FACTIONS[factionId]?.name ?? factionId} added to known factions.`
           : "";
-        events.push(`[Scouting] ${adventurer.name} spots a level ${enemy.level} ${enemy.name} in ${zoneName}.${factionNote}`);
+        events.push({ text: `${adventurer.name} spots a level ${enemy.level} ${enemy.name} in ${zoneName}.${factionNote}`, type: "scouting" });
       } else {
-        events.push(`[Scouting] ${adventurer.name} searches ${zoneName} but finds nothing unusual.`);
+        events.push({ text: `${adventurer.name} searches ${zoneName} but finds nothing unusual.`, type: "scouting" });
       }
 
     } else {
       // wander: viv already changed adventurer.location via its effect; just surface the gloss.
-      events.push(...newActionIDs.map(id => {
+      newActionIDs.forEach(id => {
         const a = state.entities[id];
-        return a.report ?? a.gloss ?? "(action)";
-      }));
+        events.push({ text: a.report ?? a.gloss ?? "(action)", type: "" });
+      });
     }
 
     state.timestamp += 10;
@@ -564,14 +588,8 @@ function render() {
   } else {
     for (const e of tick.events) {
       const el = document.createElement("div");
-      const isVictory = e.startsWith("[Victory]") || e.startsWith("[Level Up]");
-      const isRetreat = e.startsWith("[Retreat]");
-      const isScouting = e.startsWith("[Scouting]");
-      el.className = "event-entry" +
-        (isVictory  ? " victory"  :
-         isRetreat  ? " retreat"  :
-         isScouting ? " scouting" : "");
-      el.textContent = e;
+      el.className = "event-entry" + (e.type ? " " + e.type : "");
+      el.textContent = e.text;
       eventsEl.appendChild(el);
     }
   }
