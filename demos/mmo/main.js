@@ -1,4 +1,4 @@
-import { initializeVivRuntime, selectAction, EntityType } from "../../shared/viv-runtime.js";
+import { initializeVivRuntime, selectAction, attemptAction, EntityType } from "../../shared/viv-runtime.js";
 
 // --- Seeded PRNG (mulberry32) ---
 function mulberry32(seed) {
@@ -250,6 +250,7 @@ function buildInitialState(rng) {
     items: [],
     actions: [],
     vivInternalState: null,
+    zoneEnemyStacks: {},  // zoneId -> [enemyId, …] ordered by spawn time; first alive one is chosen
   };
 }
 
@@ -258,6 +259,40 @@ let cachedBundle = null;
 async function runSim(seedStr, tickCount) {
   const rng = mulberry32(hashSeed(seedStr));
   const state = buildInitialState(rng);
+
+  // --- Enemy entity helpers ---
+
+  // Returns the id of the first living enemy of a specific template on a zone's stack, or null.
+  function firstAliveEnemyOfTemplate(zoneId, templateId) {
+    for (const id of state.zoneEnemyStacks[zoneId] ?? []) {
+      const e = state.entities[id];
+      if (e?.alive && e.templateId === templateId) return id;
+    }
+    return null;
+  }
+
+  // Spawns a new enemy character entity from the given template at zoneId, pushes it onto the stack.
+  function spawnEnemy(templateId, zoneId) {
+    const template = ENEMY_TEMPLATES[templateId];
+    const id = makeUUID(rng);
+    state.entities[id] = {
+      entityType: EntityType.Character,
+      id,
+      name: template.name,
+      location: zoneId,
+      alive: true,
+      level: template.level,
+      powerLevel: template.powerLevel,
+      xpReward: template.xpReward,
+      templateId,
+      faction: template.faction,
+      memories: {},
+    };
+    state.characters.push(id);
+    if (!state.zoneEnemyStacks[zoneId]) state.zoneEnemyStacks[zoneId] = [];
+    state.zoneEnemyStacks[zoneId].push(id);
+    return id;
+  }
 
   const adapter = {
     provisionActionID: () => makeUUID(rng),
@@ -308,38 +343,75 @@ async function runSim(seedStr, tickCount) {
     const discoveredHere = adventurer.discoveredEnemies[locationID] ?? [];
     const undiscoveredHere = allEnemiesHere.filter(id => !discoveredHere.includes(id));
 
-    // Available actions depend on what's been discovered in this zone
-    const availableActions = ["wander"];
-    if (discoveredHere.length > 0) availableActions.push("fight");
-    if (undiscoveredHere.length > 0) availableActions.push("look_around");
+    // Expose precondition flags to viv so the pick-activity selector can gate fight/look-around.
+    adventurer.canFight = discoveredHere.length > 0;
+    adventurer.canScout = undiscoveredHere.length > 0;
 
-    const action = pickRandom(rng, availableActions);
+    // events is [{text, type}] — type maps to a CSS class on the entry
     const events = [];
 
-    if (action === "fight") {
+    // Viv's pick-activity selector picks wander / fight / look-around with equal weight,
+    // skipping any option whose conditions are unmet.
+    const actionsBefore = new Set(state.actions);
+    await selectAction({ initiatorID: "adventurer" });
+    const newActionIDs = state.actions.filter(id => !actionsBefore.has(id));
+    const selectedActionName = newActionIDs.length > 0 ? state.entities[newActionIDs[0]].name : null;
+
+    if (selectedActionName === "fight") {
+      // The player picks a known (scouted) enemy type to fight. If a living instance of that
+      // template is already on the zone's stack, that same entity is reused; otherwise a new
+      // one is spawned, giving it persistence across encounters.
       const templateId = pickRandom(rng, discoveredHere);
-      const enemy = ENEMY_TEMPLATES[templateId];
+      let enemyId = firstAliveEnemyOfTemplate(locationID, templateId);
+      if (!enemyId) enemyId = spawnEnemy(templateId, locationID);
+      const enemy = state.entities[enemyId];
+
       const avgPower = getAvgEquipmentPower(adventurer);
       const winChance = combatWinChance(adventurer.level, avgPower, enemy.level, enemy.powerLevel);
       const playerWins = rng() < winChance;
 
+      // Cap the reward so xp never exceeds the max-level threshold, then store it for the kill effect.
+      const xpCap = LEVEL_XP_MIN[LEVEL_CAP - 1];
+      adventurer.pendingXpReward = Math.min(enemy.xpReward, Math.max(0, xpCap - adventurer.xp));
+
+      // Shared precast: both kill and retreat reference the specific enemy viv entity.
+      const combatBindings = { adventurer: ["adventurer"], enemy: [enemyId] };
+
       if (playerWins) {
         const oldLevel = adventurer.level;
-        adventurer.xp = Math.min(adventurer.xp + enemy.xpReward, LEVEL_XP_MIN[LEVEL_CAP - 1] + enemy.xpReward);
-        adventurer.level = Math.min(getLevel(adventurer.xp), LEVEL_CAP);
-        events.push(`[Victory] ${adventurer.name} defeats a ${enemy.name}. (+${enemy.xpReward} XP)`);
-        if (adventurer.level > oldLevel) {
-          events.push(`[Level Up] ${adventurer.name} has reached level ${adventurer.level}!`);
+        // kill: applies XP via its viv effect and marks @enemy.alive = false.
+        const killBefore = new Set(state.actions);
+        await attemptAction({ actionName: "kill", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
+        state.actions.filter(id => !killBefore.has(id)).forEach(id => {
+          const a = state.entities[id];
+          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
+        });
+
+        // level-up fires immediately as a reserved viv action when the sim awards a new level.
+        const newLevel = Math.min(getLevel(adventurer.xp), LEVEL_CAP);
+        if (newLevel > oldLevel) {
+          adventurer.level = newLevel;
+          const levelBefore = new Set(state.actions);
+          await attemptAction({ actionName: "level-up", initiatorID: "adventurer", suppressConditions: true });
+          state.actions.filter(id => !levelBefore.has(id)).forEach(id => {
+            const a = state.entities[id];
+            events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
+          });
         }
       } else {
-        events.push(`[Retreat] ${adventurer.name} is driven back by a ${enemy.name}.`);
+        // retreat: enemy stays alive on the zone stack; next player to fight here meets this same enemy.
+        const retreatBefore = new Set(state.actions);
+        await attemptAction({ actionName: "retreat", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
+        state.actions.filter(id => !retreatBefore.has(id)).forEach(id => {
+          const a = state.entities[id];
+          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "retreat" });
+        });
       }
 
-    } else if (action === "look_around") {
+    } else if (selectedActionName === "look-around") {
       const foundId = pickRandom(rng, undiscoveredHere);
       const enemy = ENEMY_TEMPLATES[foundId];
       if (rng() < enemy.discoveryRate) {
-
         if (!adventurer.discoveredEnemies[locationID]) {
           adventurer.discoveredEnemies[locationID] = [];
         }
@@ -354,20 +426,17 @@ async function runSim(seedStr, tickCount) {
         const factionNote = newFaction
           ? ` ${FACTIONS[factionId]?.name ?? factionId} added to known factions.`
           : "";
-        events.push(`[Scouting] ${adventurer.name} spots a level ${enemy.level} ${enemy.name} in ${zoneName}.${factionNote}`);
+        events.push({ text: `${adventurer.name} spots a level ${enemy.level} ${enemy.name} in ${zoneName}.${factionNote}`, type: "scouting" });
       } else {
-        events.push(`[Scouting] ${adventurer.name} searches ${zoneName} but finds nothing unusual.`);
+        events.push({ text: `${adventurer.name} searches ${zoneName} but finds nothing unusual.`, type: "scouting" });
       }
 
     } else {
-      // Wander via Viv
-      const actionsBefore = new Set(state.actions);
-      await selectAction({ initiatorID: "adventurer" });
-      const newActionIDs = state.actions.filter((id) => !actionsBefore.has(id));
-      events.push(...newActionIDs.map((id) => {
+      // wander: viv already changed adventurer.location via its effect; just surface the gloss.
+      newActionIDs.forEach(id => {
         const a = state.entities[id];
-        return a.report ?? a.gloss ?? "(action)";
-      }));
+        events.push({ text: a.report ?? a.gloss ?? "(action)", type: "" });
+      });
     }
 
     state.timestamp += 10;
@@ -561,14 +630,8 @@ function render() {
   } else {
     for (const e of tick.events) {
       const el = document.createElement("div");
-      const isVictory = e.startsWith("[Victory]") || e.startsWith("[Level Up]");
-      const isRetreat = e.startsWith("[Retreat]");
-      const isScouting = e.startsWith("[Scouting]");
-      el.className = "event-entry" +
-        (isVictory  ? " victory"  :
-         isRetreat  ? " retreat"  :
-         isScouting ? " scouting" : "");
-      el.textContent = e;
+      el.className = "event-entry" + (e.type ? " " + e.type : "");
+      el.textContent = e.text;
       eventsEl.appendChild(el);
     }
   }
