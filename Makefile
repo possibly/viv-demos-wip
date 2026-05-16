@@ -1,8 +1,8 @@
 .PHONY: runtime compile serve
 
 runtime:
-	cd viv && npm ci && npm run build
-	cp viv/dist/index.browser.js shared/viv-runtime.js
+	cd viv && npm ci && npm run build --workspace=runtimes/js
+	cp viv/runtimes/js/dist/index.browser.js shared/viv-runtime.js
 
 compile:
 	for d in demos/*/; do \
