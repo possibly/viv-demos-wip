@@ -1,0 +1,85 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0f0f0f;
+  --surface: #1a1a1a;
+  --border: #2a2a2a;
+  --text: #e0e0e0;
+  --text-muted: #777;
+  --accent: #7c9ef8;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  --font-ui: system-ui, sans-serif;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+/* debug panel overlay */
+.viv-debug-panel {
+  position: fixed;
+  bottom: 0;
+  right: 0;
+  width: 420px;
+  max-height: 60vh;
+  background: rgba(15, 15, 15, 0.95);
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+
+.viv-debug-panel.collapsed { max-height: 32px; }
+
+.viv-debug-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  height: 32px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.viv-debug-panel__header:hover { color: var(--text); }
+
+.viv-debug-panel__tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.viv-debug-panel__tab {
+  padding: 4px 12px;
+  cursor: pointer;
+  color: var(--text-muted);
+  border-right: 1px solid var(--border);
+}
+
+.viv-debug-panel__tab.active { color: var(--text); background: #1a1a1a; }
+
+.viv-debug-panel__content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+}
+
+.viv-debug-panel__pane {
+  flex: 1;
+  overflow-y: auto;
+  display: none;
+  padding: 8px;
+}
+
+.viv-debug-panel__pane.active { display: block; }

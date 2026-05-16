@@ -1,0 +1,4 @@
+[submodule "viv"]
+	path = viv
+	url = https://github.com/possibly/viv
+	branch = browser/runtime

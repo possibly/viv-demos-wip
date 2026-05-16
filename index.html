@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>viv demos</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #0f0f0f;
+      color: #e0e0e0;
+      padding: 3rem 2rem;
+      max-width: 640px;
+      margin: 0 auto;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; color: #fff; }
+    p { color: #888; margin-bottom: 2rem; font-size: 0.95rem; }
+    ul { list-style: none; display: flex; flex-direction: column; gap: 0.75rem; }
+    li a {
+      display: block;
+      padding: 1rem 1.25rem;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      text-decoration: none;
+      color: #e0e0e0;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    li a:hover { background: #222; border-color: #444; }
+    li a .num { color: #555; font-size: 0.8rem; margin-bottom: 0.2rem; }
+    li a .name { font-weight: 500; }
+    li a .desc { color: #777; font-size: 0.85rem; margin-top: 0.2rem; }
+  </style>
+</head>
+<body>
+  <h1>viv demos</h1>
+  <p>Interactive simulations built on the viv runtime.</p>
+  <ul>
+    <li>
+      <a href="demos/01-hello-world/">
+        <div class="num">01</div>
+        <div class="name">Hello World</div>
+        <div class="desc">A minimal viv simulation running in the browser.</div>
+      </a>
+    </li>
+    <li>
+      <a href="demos/02-chatbot/">
+        <div class="num">02</div>
+        <div class="name">Chatbot</div>
+        <div class="desc">A conversational agent powered by a viv simulation.</div>
+      </a>
+    </li>
+  </ul>
+</body>
+</html>

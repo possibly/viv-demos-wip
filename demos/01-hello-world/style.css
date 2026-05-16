@@ -1,0 +1,25 @@
+@import "../../shared/ui/shared.css";
+
+#app {
+  max-width: 600px;
+  margin: 4rem auto;
+  padding: 0 1.5rem;
+}
+
+h1 {
+  font-size: 1.75rem;
+  margin-bottom: 1.5rem;
+  color: #fff;
+}
+
+#output {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  line-height: 1.8;
+}
+
+#output .event {
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--border);
+}
