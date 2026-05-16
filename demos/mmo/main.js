@@ -107,10 +107,11 @@ function initialFactionRep(factionId) {
 
 // --- Enemy NPC templates ---
 // power level 1 = "basic" tier
+// discoveryRate: probability (0–1) of spotting this enemy on a look-around attempt
 const ENEMY_TEMPLATES = {
-  grimspawn_scout:    { id: "grimspawn_scout",    name: "Grimspawn Scout",    faction: ENEMY_FACTION.id, level: 1, powerLevel: 1, xpReward: 50 },
-  grimspawn_warrior:  { id: "grimspawn_warrior",  name: "Grimspawn Warrior",  faction: ENEMY_FACTION.id, level: 2, powerLevel: 1, xpReward: 100 },
-  grimspawn_enforcer: { id: "grimspawn_enforcer", name: "Grimspawn Enforcer", faction: ENEMY_FACTION.id, level: 3, powerLevel: 1, xpReward: 200 },
+  grimspawn_scout:    { id: "grimspawn_scout",    name: "Grimspawn Scout",    faction: ENEMY_FACTION.id, level: 1, powerLevel: 1, xpReward: 50,  discoveryRate: 1.0 },
+  grimspawn_warrior:  { id: "grimspawn_warrior",  name: "Grimspawn Warrior",  faction: ENEMY_FACTION.id, level: 2, powerLevel: 1, xpReward: 100, discoveryRate: 1.0 },
+  grimspawn_enforcer: { id: "grimspawn_enforcer", name: "Grimspawn Enforcer", faction: ENEMY_FACTION.id, level: 3, powerLevel: 1, xpReward: 200, discoveryRate: 1.0 },
 };
 
 // Enemy templates that inhabit each zone; absent = safe zone
@@ -119,8 +120,6 @@ const ZONE_ENEMIES = {
   stonewick:  ["grimspawn_scout"],
   stillwater: ["grimspawn_warrior", "grimspawn_enforcer"],
 };
-
-const LOOK_AROUND_FIND_CHANCE = 0.65;
 
 // --- Equipment ---
 const EQUIPMENT_SLOTS = [
@@ -337,9 +336,9 @@ async function runSim(seedStr, tickCount) {
       }
 
     } else if (action === "look_around") {
-      if (rng() < LOOK_AROUND_FIND_CHANCE) {
-        const foundId = pickRandom(rng, undiscoveredHere);
-        const enemy = ENEMY_TEMPLATES[foundId];
+      const foundId = pickRandom(rng, undiscoveredHere);
+      const enemy = ENEMY_TEMPLATES[foundId];
+      if (rng() < enemy.discoveryRate) {
 
         if (!adventurer.discoveredEnemies[locationID]) {
           adventurer.discoveredEnemies[locationID] = [];
