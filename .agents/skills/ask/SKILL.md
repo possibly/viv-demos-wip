@@ -15,7 +15,7 @@ The user is asking about Viv.
 
 1. Start with my Viv primer. It covers the constructs, concepts, and toolchain at a high level.
 2. If the question goes deeper than the primer covers, use the monorepo map (`viv-plugin-get-monorepo-map`) to locate the relevant files. Search the map, find the right file path(s), then use `viv-plugin-read-monorepo-file` to read those files. The map is usually faster than grepping, but `viv-plugin-explore-monorepo grep` is available when you need to search for specific terms.
-3. If the monorepo is not available, you can clone it directly from GitHub: `git clone https://github.com/siftystudio/viv` into the project directory and explore it from there. Tell the user what you're doing. If cloning isn't possible either, say: "I don't have the full Viv reference material yet. I can clone https://github.com/siftystudio/viv locally, or you can run `/viv:setup` for a full install."
+3. If the monorepo is not available via plugin tools, check whether `viv/` exists in the project root (it's a git submodule of the Viv source). If it's populated, read files from it directly. If it's empty, run `git submodule update --init` to populate it (or `./scripts/setup.sh` which does this and more). Only fall back to cloning from GitHub if neither option is available.
 4. If the question requires deep investigation (reading multiple chapters, cross-referencing the grammar, tracing through compiler code), load the researcher reference (`viv-plugin-get-plugin-file researcher`) and follow its instructions for a thorough investigation.
 
 ## What you don't know
