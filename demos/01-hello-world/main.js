@@ -1,7 +1,5 @@
 import { initializeVivRuntime, selectAction, EntityType } from "../../shared/viv-runtime.js";
 
-const TICK_COUNT = 6;
-
 // Seeded PRNG (mulberry32)
 function mulberry32(seed) {
   return () => {
@@ -50,7 +48,7 @@ function buildInitialState() {
 
 let cachedBundle = null;
 
-async function runSim(seedStr) {
+async function runSim(seedStr, tickCount) {
   const rng = mulberry32(hashSeed(seedStr));
 
   const state = buildInitialState();
@@ -98,7 +96,7 @@ async function runSim(seedStr) {
   initializeVivRuntime({ contentBundle: cachedBundle, adapter });
 
   const ticks = [];
-  for (let t = 0; t < TICK_COUNT; t++) {
+  for (let t = 0; t < tickCount; t++) {
     const actionsBefore = new Set(state.actions);
     for (const cid of state.characters) {
       await selectAction({ initiatorID: cid });
@@ -137,6 +135,7 @@ const btnRun = document.getElementById("btn-run");
 const charactersEl = document.getElementById("characters");
 const eventsEl = document.getElementById("events");
 const seedInput = document.getElementById("seed-input");
+const stepsInput = document.getElementById("steps-input");
 
 function render() {
   const tick = ticks[currentTick];
@@ -185,11 +184,12 @@ function setStatus(msg, isError = false) {
 
 async function runSimulation() {
   const seedStr = seedInput.value.trim() || "hello-world";
+  const tickCount = Math.min(500, Math.max(1, parseInt(stepsInput.value, 10) || 100));
   btnRun.disabled = true;
-  setStatus("running simulation…");
+  setStatus(`running ${tickCount} tick${tickCount === 1 ? "" : "s"}…`);
   simViewEl.hidden = true;
   try {
-    ticks = await runSim(seedStr);
+    ticks = await runSim(seedStr, tickCount);
     currentTick = 0;
     simViewEl.hidden = false;
     render();
@@ -206,3 +206,4 @@ btnRun.addEventListener("click", runSimulation);
 btnPrev.addEventListener("click", () => { if (currentTick > 0) { currentTick--; render(); } });
 btnNext.addEventListener("click", () => { if (currentTick < ticks.length - 1) { currentTick++; render(); } });
 seedInput.addEventListener("keydown", (e) => { if (e.key === "Enter") runSimulation(); });
+stepsInput.addEventListener("keydown", (e) => { if (e.key === "Enter") runSimulation(); });
