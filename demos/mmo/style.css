@@ -105,7 +105,6 @@ main { padding: 1.25rem; max-width: 700px; }
   transition: border-color 0.15s;
 }
 #sim-view .char-card:hover { border-color: var(--mmo-gold); }
-#sim-view .char-card:hover .char-card-hint { opacity: 1; }
 .char-portrait {
   width: 52px;
   height: 52px;
@@ -130,27 +129,11 @@ main { padding: 1.25rem; max-width: 700px; }
   margin-top: 0.2rem;
 }
 .char-sep { margin: 0 0.3em; }
-.char-faction {
-  font-size: 0.78rem;
-  font-weight: 600;
-  margin-top: 0.15rem;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
 .char-level {
   font-size: 0.78rem;
   color: var(--mmo-gold);
   margin-top: 0.25rem;
   font-family: var(--font-mono);
-}
-.char-card-hint {
-  margin-left: auto;
-  font-size: 0.68rem;
-  color: var(--text-muted);
-  opacity: 0.5;
-  align-self: flex-end;
-  padding-bottom: 0.1rem;
-  white-space: nowrap;
 }
 
 /* Timeline */
@@ -241,6 +224,19 @@ main { padding: 1.25rem; max-width: 700px; }
   margin-top: 0.1rem;
   line-height: 1.35;
 }
+.zone-enemies {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin-top: 0.35rem;
+}
+.zone-enemy {
+  display: block;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: #b06060;
+}
+.zone-node.active .zone-enemy { color: #c87070; }
 
 /* Chronicle / events */
 .event-list {
