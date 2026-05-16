@@ -34,17 +34,15 @@ const setIn = (obj, path, value) => {
   cur[parts[parts.length - 1]] = value;
 };
 
-// --- Vanilla WoW data ---
-
 const RACES = {
-  human:     { faction: "Alliance", names: { m: ["Anduin","Arthas","Varian","Marcus","Edwin","Roland","Gareth","Stormwind"], f: ["Jaina","Katrana","Tiffin","Elaine","Moira","Reyna","Lyssa","Celeste"] } },
-  dwarf:     { faction: "Alliance", names: { m: ["Magni","Brann","Muradin","Thargas","Belgrom","Ironforge","Thane","Bolvar"], f: ["Moira","Dagran","Freja","Helga","Irmgard","Sigrid","Brynja","Astrid"] } },
-  nightelf:  { faction: "Alliance", names: { m: ["Malfurion","Illidan","Tyrande","Cenarius","Jarod","Shandris","Naisha","Shadowmeld"], f: ["Tyrande","Shandris","Naisha","Ysera","Whisperwind","Moonwhisper","Starglade","Dawnsong"] } },
-  gnome:     { faction: "Alliance", names: { m: ["Mekkatorque","Gelbin","Thermaplugg","Cogsworth","Tinkmaster","Fizzwidget","Sprocket","Zap"], f: ["Lissanna","Fizzy","Cogsworth","Tinker","Sprocket","Wrenchy","Bolty","Gizmo"] } },
-  orc:       { faction: "Horde",    names: { m: ["Thrall","Grom","Durotan","Orgrim","Garrosh","Nazgrel","Kargath","Nazgrim"], f: ["Draka","Garona","Aggra","Rehgar","Lantresor","Mekthorg","Kor","Geyah"] } },
-  undead:    { faction: "Horde",    names: { m: ["Sylvanas","Nathanos","Varimathras","Kel'Thuzad","Putress","Faranell","Bethor","Gunther"], f: ["Sylvanas","Alonsus","Leonid","Bethor","Calia","Alina","Velsa","Marsea"] } },
-  tauren:    { faction: "Horde",    names: { m: ["Cairne","Baine","Hamuul","Magatha","Stormsong","Stonehoof","Thunderhorn","Windtotem"], f: ["Magatha","Aponi","Tahu","Sunwalker","Mistrunner","Cloudchaser","Earthmother","Stormhoof"] } },
-  troll:     { faction: "Horde",    names: { m: ["Vol'jin","Rokhan","Zul'jin","Hexlord","Malacrass","Akali","Zanzil","Rastakhan"], f: ["Zekhan","Talanji","Voodoo","Hexla","Juju","Witcha","Zala","Saraka"] } },
+  human:    { faction: "Covenant", names: { m: ["Gareth","Roland","Marcus","Edwin","Aldric","Brennan","Calder","Donovan"], f: ["Elaine","Lyssa","Celeste","Mira","Reyna","Arden","Brielle","Cayla"] } },
+  dwarf:    { faction: "Covenant", names: { m: ["Thane","Belden","Grundar","Kordak","Torvin","Volgrin","Brundar","Aldric"], f: ["Helga","Sigrid","Freya","Astrid","Brynja","Ingrid","Vigdis","Dagmar"] } },
+  elf:      { faction: "Covenant", names: { m: ["Faelyn","Sylvan","Aeron","Caelan","Miral","Thalion","Erevan","Caladorn"], f: ["Lyria","Aeris","Miriel","Senna","Sylara","Thalindra","Elowen","Caladwen"] } },
+  gnome:    { faction: "Covenant", names: { m: ["Cogsworth","Fizzle","Sprocket","Tinkard","Boltz","Gadget","Widget","Crank"], f: ["Fizzy","Bolty","Gizmo","Twitch","Ratchet","Wrenchy","Clicky","Sparky"] } },
+  orc:      { faction: "Vanguard", names: { m: ["Kragnok","Bloodtusk","Grimfang","Gorthar","Vorak","Thrak","Muzgash","Drakkul"], f: ["Dasha","Grona","Korra","Meksha","Vrasha","Gorla","Traka","Durga"] } },
+  revenant: { faction: "Vanguard", names: { m: ["Valdris","Corvus","Ashgor","Grimton","Soulren","Morvane","Wraithek","Duskmore"], f: ["Velsa","Marsea","Ashlea","Corvina","Mournweave","Shadowveil","Duskara","Wraithia"] } },
+  minotaur: { faction: "Vanguard", names: { m: ["Earthhorn","Stormhoof","Thunderstone","Boulderback","Wildhorn","Ironhide","Dustwalker","Stoneback"], f: ["Cloudchaser","Mistrunner","Sunwalker","Windsong","Skygazer","Meadowhoof","Dawnstep","Rainhoof"] } },
+  troll:    { faction: "Vanguard", names: { m: ["Zekhan","Voodrix","Hexlord","Zanzil","Akali","Malacrass","Zaruka","Jixtar"], f: ["Zalaxa","Jixxa","Hexxa","Vuja","Mossi","Lixxa","Zanda","Trolla"] } },
 };
 
 const CLASS_DATA = {
@@ -62,26 +60,25 @@ const CLASS_DATA = {
 const RACE_CLASS = {
   human:    ["warrior","paladin","rogue","priest","mage","warlock"],
   dwarf:    ["warrior","paladin","hunter","rogue","priest"],
-  nightelf: ["warrior","hunter","rogue","priest","druid"],
+  elf:      ["warrior","hunter","rogue","priest","druid"],
   gnome:    ["warrior","rogue","mage","warlock"],
   orc:      ["warrior","hunter","rogue","shaman","warlock"],
-  undead:   ["warrior","rogue","priest","mage","warlock"],
-  tauren:   ["warrior","hunter","shaman","druid"],
+  revenant: ["warrior","rogue","priest","mage","warlock"],
+  minotaur: ["warrior","hunter","shaman","druid"],
   troll:    ["warrior","hunter","rogue","priest","shaman"],
 };
 
 const RACE_LABELS = {
-  human: "Human", dwarf: "Dwarf", nightelf: "Night Elf", gnome: "Gnome",
-  orc: "Orc", undead: "Undead", tauren: "Tauren", troll: "Troll",
+  human: "Human", dwarf: "Dwarf", elf: "Elf", gnome: "Gnome",
+  orc: "Orc", revenant: "Revenant", minotaur: "Minotaur", troll: "Troll",
 };
 
-// --- Starter zone: Elwynn Forest with 5 subzones ---
 const ZONES = [
-  { id: "northshire",    name: "Northshire Valley",  desc: "A peaceful valley with a small abbey. The starting breath of adventure." },
-  { id: "goldshire",     name: "Goldshire",           desc: "A bustling crossroads hamlet, the Lion's Pride Inn calling to weary travelers." },
-  { id: "forest_edge",   name: "Forest's Edge",       desc: "The treeline thickens here; wolves and bandits lurk in the shadows." },
-  { id: "stonefield",    name: "Stonefield Farm",     desc: "Rolling fields and weathered farmhouses, pigs rooting in the mud." },
-  { id: "mirror_lake",   name: "Mirror Lake",         desc: "A glittering lake that reflects the sky. Defias lookouts watch from the reeds." },
+  { id: "hearthfield",  name: "Hearthfield",       desc: "A peaceful hillside settlement where new arrivals catch their first breath." },
+  { id: "millhaven",    name: "Millhaven",          desc: "A busy crossroads hamlet; the Wayward Lantern inn draws travelers from across the realm." },
+  { id: "briar_edge",   name: "The Briar's Edge",   desc: "The treeline thickens here; wolves and bandits lurk in the tangled undergrowth." },
+  { id: "stonewick",    name: "Stonewick Farm",     desc: "Rolling fields and weathered farmhouses, goats grazing in the amber light." },
+  { id: "stillwater",   name: "Stillwater Mere",    desc: "A glittering lake that mirrors the sky. Scouts watch from the reed banks." },
 ];
 
 function pickRandom(rng, arr) {
@@ -215,7 +212,7 @@ const zonemapEl = document.getElementById("zonemap");
 function renderCharCard(char) {
   const cd = CLASS_DATA[char.class];
   const genderLabel = char.gender === "m" ? "Male" : "Female";
-  const factionColor = char.faction === "Alliance" ? "#2a7dc9" : "#c42b2b";
+  const factionColor = char.faction === "Covenant" ? "#2a7dc9" : "#c42b2b";
   charCardEl.innerHTML = `
     <div class="char-portrait" style="border-color: ${cd.color}">
       <span class="char-icon">${cd.icon}</span>
@@ -274,7 +271,7 @@ function setStatus(msg, isError = false) {
 }
 
 async function runSimulation() {
-  const seedStr = seedInput.value.trim() || "azeroth";
+  const seedStr = seedInput.value.trim() || "greenvale";
   const tickCount = Math.min(500, Math.max(1, parseInt(stepsInput.value, 10) || 20));
   btnRun.disabled = true;
   setStatus(`entering the world…`);
