@@ -2,6 +2,8 @@
 // fight is gated on having discovered enemies in the current zone; look-around requires undiscovered ones.
 // kill, retreat, and level-up fire immediately as reserved actions on the same timestep as fight.
 // Enemies are spawned as viv item entities and persist on a per-zone stack until killed.
+// accept-quest fires when the adventurer meets a quest giver and is eligible for the next quest.
+// The quest-hunt plan drives the adventurer through finding, killing, returning, and completing a quest.
 
 reserved action wander:
     gloss: "@adventurer wanders into @destination"
@@ -38,7 +40,7 @@ reserved action kill:
             queue action level-up:
                 with:
                     @adventurer: @adventurer
-                    @enemy: @enemy
+                    @cause: @enemy
                 urgent: true
         end
 
@@ -59,14 +61,85 @@ reserved action look-around:
         @adventurer.canScout
 
 reserved action level-up:
-    gloss: "@adventurer reaches level {@adventurer.pendingLevel} after slaying @enemy"
+    gloss: "@adventurer reaches level {@adventurer.pendingLevel}"
     roles:
         @adventurer:
             as: initiator
-        @enemy:
+        @cause:
             as: recipient
+            n: 0-1
     effects:
         @adventurer.level = @adventurer.pendingLevel
+
+reserved action accept-quest:
+    gloss: "@adventurer accepts the quest from @questGiver"
+    roles:
+        @adventurer:
+            as: initiator
+        @questGiver:
+            as: recipient
+    conditions:
+        !(@adventurer.questActive)
+        @adventurer.pendingQuestEligible
+    effects:
+        @adventurer.questActive = true
+        @adventurer.questKillsDone = 0
+    reactions:
+        queue plan quest-hunt:
+            with:
+                @adventurer: @adventurer
+                @questGiver: @questGiver
+
+plan quest-hunt:
+    roles:
+        @adventurer:
+            as: character
+        @questGiver:
+            as: character
+    phases:
+        >find-enemy:
+            wait:
+                timeout: 365 days
+                until:
+                    @adventurer.questEnemyFound
+            advance;
+        >hunt-enemy:
+            wait:
+                timeout: 365 days
+                until:
+                    @adventurer.questHuntDone
+            advance;
+        >return-to-giver:
+            wait:
+                timeout: 365 days
+                until:
+                    @adventurer.questReadyToComplete
+            advance;
+        >complete:
+            queue action complete-quest:
+                with:
+                    @adventurer: @adventurer
+                    @questGiver: @questGiver
+            succeed;
+
+reserved action complete-quest:
+    gloss: "@adventurer completes the quest for @questGiver"
+    roles:
+        @adventurer:
+            as: initiator
+        @questGiver:
+            as: recipient
+    effects:
+        @adventurer.xp += @adventurer.questXpReward
+        @adventurer.questActive = false
+    reactions:
+        if @adventurer.pendingLevel > @adventurer.level:
+            queue action level-up:
+                with:
+                    @adventurer: @adventurer
+                    @cause: @questGiver
+                urgent: true
+        end
 
 action-selector pick-activity:
     roles:

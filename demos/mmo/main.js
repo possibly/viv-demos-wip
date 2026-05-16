@@ -1,7 +1,7 @@
-import { initializeVivRuntime, selectAction, attemptAction, EntityType } from "../../shared/viv-runtime.js";
-import { runSim, CLASS_DATA, ZONES, ENEMY_TEMPLATES, ZONE_ENEMIES, LEVEL_XP_MIN, LEVEL_CAP, FACTIONS, RACE_LABELS, EQUIPMENT_SLOTS, SLOT_LABELS } from "./sim.mjs";
+import { initializeVivRuntime, selectAction, attemptAction, tickPlanner, EntityType } from "../../shared/viv-runtime.js";
+import { runSim, CLASS_DATA, ZONES, ENEMY_TEMPLATES, ZONE_ENEMIES, LEVEL_XP_MIN, LEVEL_CAP, FACTIONS, RACE_LABELS, EQUIPMENT_SLOTS, SLOT_LABELS, QUEST_GIVER, QUESTS } from "./sim.mjs";
 
-const runtime = { initializeVivRuntime, selectAction, attemptAction, EntityType };
+const runtime = { initializeVivRuntime, selectAction, attemptAction, tickPlanner, EntityType };
 let cachedBundle = null;
 
 let simData = null;
@@ -30,12 +30,31 @@ function factionStanding(rep) {
   return            { label: "Honored",     cls: "standing-honored" };
 }
 
+function questStatusText(char) {
+  if (!char.questActive) return null;
+  const quest = QUESTS.find(q => q.id === char.questId);
+  if (!quest) return null;
+  const done = char.questKillsDone ?? 0;
+  const needed = char.questKillsNeeded ?? quest.targetCount;
+  let phase;
+  if (!char.questEnemyFound) phase = "Scouting…";
+  else if (done < needed) phase = `Slain: ${done} / ${needed}`;
+  else if (!char.questReadyToComplete) phase = `Return to ${QUEST_GIVER.name}`;
+  else phase = "Ready to turn in!";
+  return { name: quest.name, phase };
+}
+
 function renderCharCard(char) {
   const cd = CLASS_DATA[char.class];
   const level = char.level ?? 1;
   const xp = char.xp ?? 0;
   const nextXP = level < LEVEL_CAP ? LEVEL_XP_MIN[level] : null;
   const xpText = nextXP !== null ? `${xp} / ${nextXP} XP` : `${xp} XP (max)`;
+
+  const qs = questStatusText(char);
+  const questHTML = qs
+    ? `<div class="char-quest"><span class="quest-name">${qs.name}</span><span class="quest-phase">${qs.phase}</span></div>`
+    : "";
 
   charCardEl.innerHTML = `
     <div class="char-portrait" style="border-color: ${cd.color}">
@@ -49,6 +68,7 @@ function renderCharCard(char) {
         <span>${RACE_LABELS[char.race]}</span>
       </div>
       <div class="char-level">Level ${level} · ${xpText}</div>
+      ${questHTML}
     </div>`;
 }
 
@@ -77,6 +97,22 @@ function renderModal(char) {
     if (!item) return `<tr><td class="col-label col-muted">${label}</td><td class="col-muted">—</td><td class="col-power col-muted">—</td></tr>`;
     return `<tr><td class="col-label">${label}</td><td>${item.name}</td><td class="col-power">${item.powerLevel}</td></tr>`;
   }).join("");
+
+  const activeQuest = char.questActive ? QUESTS.find(q => q.id === char.questId) : null;
+  const completedQuestNames = (char.completedQuests ?? []).map(id => QUESTS.find(q => q.id === id)?.name ?? id);
+
+  const qs = questStatusText(char);
+  const questSectionHTML = (activeQuest || completedQuestNames.length > 0) ? `
+    <div class="modal-section">
+      <div class="modal-section-title">Quests</div>
+      <table class="modal-table"><tbody>
+        ${activeQuest ? `<tr><td class="col-label">Active</td><td>${activeQuest.name}</td></tr>
+          <tr><td class="col-label col-muted">Goal</td><td class="col-muted">${activeQuest.description}</td></tr>
+          <tr><td class="col-label col-muted">Progress</td><td class="col-muted">${qs?.phase ?? ""}</td></tr>
+          <tr><td class="col-label col-muted">Reward</td><td class="col-muted">${char.questXpReward ?? 0} XP</td></tr>` : ""}
+        ${completedQuestNames.length > 0 ? `<tr><td class="col-label">Completed</td><td>${completedQuestNames.join(", ")}</td></tr>` : ""}
+      </tbody></table>
+    </div>` : "";
 
   const knownFactions = Object.entries(char.factionRelationships ?? {});
   const factionRows = knownFactions.length === 0
@@ -112,13 +148,14 @@ function renderModal(char) {
         <tbody>${equipRows}</tbody>
       </table>
     </div>
+    ${questSectionHTML}
     <div class="modal-section">
       <div class="modal-section-title">Known Factions</div>
       <table class="modal-table">${factionHead}<tbody>${factionRows}</tbody></table>
     </div>`;
 }
 
-function renderZonemap(currentLocationID, discoveredEnemies) {
+function renderZonemap(currentLocationID, discoveredEnemies, discoveredQuestGivers) {
   zonemapEl.innerHTML = "";
   for (const z of ZONES) {
     const el = document.createElement("div");
@@ -136,7 +173,12 @@ function renderZonemap(currentLocationID, discoveredEnemies) {
       ? `<div class="zone-enemies">${discovered.map(e => `<span class="zone-enemy">${e.name} · Lv. ${e.level}</span>`).join("")}</div>`
       : "";
 
-    el.innerHTML = `<span class="zone-name">${z.name}</span><span class="zone-desc">${z.desc}</span>${enemyHTML}`;
+    const giverKnown = (discoveredQuestGivers?.[z.id] ?? []).includes(QUEST_GIVER.id);
+    const giverHTML = giverKnown
+      ? `<div class="zone-quest-giver"><span class="zone-npc">&#x1F4DC; ${QUEST_GIVER.name}</span></div>`
+      : "";
+
+    el.innerHTML = `<span class="zone-name">${z.name}</span><span class="zone-desc">${z.desc}</span>${enemyHTML}${giverHTML}`;
     zonemapEl.appendChild(el);
   }
 }
@@ -150,7 +192,7 @@ function render() {
   btnNext.disabled = currentTick === simData.ticks.length - 1;
 
   renderCharCard(tick.character);
-  renderZonemap(tick.character.location, tick.character.discoveredEnemies);
+  renderZonemap(tick.character.location, tick.character.discoveredEnemies, tick.character.discoveredQuestGivers);
   if (!charModalEl.hidden) renderModal(tick.character);
 
   eventsEl.innerHTML = "";
