@@ -310,11 +310,11 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
       const xpCap = LEVEL_XP_MIN[LEVEL_CAP - 1];
       adventurer.pendingXpReward = Math.min(enemy.xpReward, Math.max(0, xpCap - adventurer.xp));
+      adventurer.pendingLevel = Math.min(getLevel(adventurer.xp + adventurer.pendingXpReward), LEVEL_CAP);
 
       const combatBindings = { adventurer: ["adventurer"], enemy: [enemyId] };
 
       if (playerWins) {
-        const oldLevel = adventurer.level;
         const killBefore = new Set(state.actions);
         await attemptAction({ actionName: "kill", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
         state.actions.filter(id => !killBefore.has(id)).forEach(id => {
@@ -322,16 +322,12 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
           events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
         });
 
-        const newLevel = Math.min(getLevel(adventurer.xp), LEVEL_CAP);
-        if (newLevel > oldLevel) {
-          adventurer.level = newLevel;
-          const levelBefore = new Set(state.actions);
-          await attemptAction({ actionName: "level-up", initiatorID: "adventurer", suppressConditions: true });
-          state.actions.filter(id => !levelBefore.has(id)).forEach(id => {
-            const a = state.entities[id];
-            events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
-          });
-        }
+        const levelUpBefore = new Set(state.actions);
+        await selectAction({ initiatorID: "adventurer", urgentOnly: true });
+        state.actions.filter(id => !levelUpBefore.has(id)).forEach(id => {
+          const a = state.entities[id];
+          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
+        });
       } else {
         const retreatBefore = new Set(state.actions);
         await attemptAction({ actionName: "retreat", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });

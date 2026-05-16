@@ -33,6 +33,14 @@ reserved action kill:
     effects:
         @adventurer.xp += @adventurer.pendingXpReward
         @enemy.alive = false
+    reactions:
+        if @adventurer.pendingLevel > @adventurer.level:
+            queue action level-up:
+                with:
+                    @adventurer: @adventurer
+                    @enemy: @enemy
+                urgent: true
+        end
 
 reserved action retreat:
     gloss: "@adventurer retreats from @enemy"
@@ -51,10 +59,14 @@ reserved action look-around:
         @adventurer.canScout
 
 reserved action level-up:
-    gloss: "@adventurer reaches level {@adventurer.level}"
+    gloss: "@adventurer reaches level {@adventurer.pendingLevel} after slaying @enemy"
     roles:
         @adventurer:
             as: initiator
+        @enemy:
+            as: recipient
+    effects:
+        @adventurer.level = @adventurer.pendingLevel
 
 action-selector pick-activity:
     roles:
