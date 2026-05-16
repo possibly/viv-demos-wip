@@ -1,6 +1,7 @@
 // MMO Starter World — each tick, the adventurer's activity is chosen by the pick-activity selector.
 // fight is gated on having discovered enemies in the current zone; look-around requires undiscovered ones.
 // kill, retreat, and level-up fire immediately as reserved actions on the same timestep as fight.
+// Enemies are spawned as viv item entities and persist on a per-zone stack until killed.
 
 reserved action wander:
     gloss: "@adventurer wanders into @destination"
@@ -23,18 +24,23 @@ reserved action fight:
         @adventurer.canFight
 
 reserved action kill:
-    gloss: "@adventurer slays the {@adventurer.foeName} (+{@adventurer.pendingXpReward} XP)"
+    gloss: "@adventurer slays @enemy"
     roles:
         @adventurer:
             as: initiator
+        @enemy:
+            as: item
     effects:
         @adventurer.xp += @adventurer.pendingXpReward
+        @enemy.alive = false
 
 reserved action retreat:
-    gloss: "@adventurer is driven back by the {@adventurer.foeName}"
+    gloss: "@adventurer retreats from @enemy"
     roles:
         @adventurer:
             as: initiator
+        @enemy:
+            as: item
 
 reserved action look-around:
     gloss: "@adventurer scouts the area"

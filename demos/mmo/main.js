@@ -250,6 +250,7 @@ function buildInitialState(rng) {
     items: [],
     actions: [],
     vivInternalState: null,
+    zoneEnemyStacks: {},  // zoneId -> [enemyId, …] ordered by spawn time; first alive one is chosen
   };
 }
 
@@ -258,6 +259,38 @@ let cachedBundle = null;
 async function runSim(seedStr, tickCount) {
   const rng = mulberry32(hashSeed(seedStr));
   const state = buildInitialState(rng);
+
+  // --- Enemy entity helpers ---
+
+  // Returns the id of the first living enemy on a zone's stack, or null if none.
+  function firstAliveEnemy(zoneId) {
+    for (const id of state.zoneEnemyStacks[zoneId] ?? []) {
+      if (state.entities[id]?.alive) return id;
+    }
+    return null;
+  }
+
+  // Spawns a new enemy entity from the given template at zoneId, pushes it onto that zone's stack.
+  function spawnEnemy(templateId, zoneId) {
+    const template = ENEMY_TEMPLATES[templateId];
+    const id = makeUUID(rng);
+    state.entities[id] = {
+      entityType: EntityType.Item,
+      id,
+      name: template.name,
+      location: zoneId,
+      alive: true,
+      level: template.level,
+      powerLevel: template.powerLevel,
+      xpReward: template.xpReward,
+      templateId,
+      faction: template.faction,
+    };
+    state.items.push(id);
+    if (!state.zoneEnemyStacks[zoneId]) state.zoneEnemyStacks[zoneId] = [];
+    state.zoneEnemyStacks[zoneId].push(id);
+    return id;
+  }
 
   const adapter = {
     provisionActionID: () => makeUUID(rng),
@@ -323,24 +356,29 @@ async function runSim(seedStr, tickCount) {
     const selectedActionName = newActionIDs.length > 0 ? state.entities[newActionIDs[0]].name : null;
 
     if (selectedActionName === "fight") {
-      const templateId = pickRandom(rng, discoveredHere);
-      const enemy = ENEMY_TEMPLATES[templateId];
+      // Reuse an existing living enemy at this zone, or spawn a fresh one from a discovered template.
+      let enemyId = firstAliveEnemy(locationID);
+      if (!enemyId) {
+        enemyId = spawnEnemy(pickRandom(rng, discoveredHere), locationID);
+      }
+      const enemy = state.entities[enemyId];
+
       const avgPower = getAvgEquipmentPower(adventurer);
       const winChance = combatWinChance(adventurer.level, avgPower, enemy.level, enemy.powerLevel);
       const playerWins = rng() < winChance;
 
-      // Store enemy context so viv can use it in kill/retreat glosses and the kill XP effect.
-      adventurer.foeName = enemy.name;
-      adventurer.foeLevel = enemy.level;
-      // Cap the reward so xp never exceeds the max level threshold.
+      // Cap the reward so xp never exceeds the max-level threshold, then store it for the kill effect.
       const xpCap = LEVEL_XP_MIN[LEVEL_CAP - 1];
       adventurer.pendingXpReward = Math.min(enemy.xpReward, Math.max(0, xpCap - adventurer.xp));
 
+      // Shared precast: both kill and retreat reference the specific enemy viv entity.
+      const combatBindings = { adventurer: ["adventurer"], enemy: [enemyId] };
+
       if (playerWins) {
         const oldLevel = adventurer.level;
-        // kill records itself in viv and applies the XP gain via its effect.
+        // kill: applies XP via its viv effect and marks @enemy.alive = false.
         const killBefore = new Set(state.actions);
-        await attemptAction({ actionName: "kill", initiatorID: "adventurer", suppressConditions: true });
+        await attemptAction({ actionName: "kill", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
         state.actions.filter(id => !killBefore.has(id)).forEach(id => {
           const a = state.entities[id];
           events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
@@ -358,8 +396,9 @@ async function runSim(seedStr, tickCount) {
           });
         }
       } else {
+        // retreat: enemy stays alive on the zone stack; next player to fight here meets this same enemy.
         const retreatBefore = new Set(state.actions);
-        await attemptAction({ actionName: "retreat", initiatorID: "adventurer", suppressConditions: true });
+        await attemptAction({ actionName: "retreat", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
         state.actions.filter(id => !retreatBefore.has(id)).forEach(id => {
           const a = state.entities[id];
           events.push({ text: a.report ?? a.gloss ?? "(action)", type: "retreat" });
