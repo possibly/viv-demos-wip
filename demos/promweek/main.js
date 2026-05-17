@@ -157,18 +157,17 @@ async function handleAction(actionName) {
       reactionName:  result.jordanReaction?.name  ?? null,
     });
     renderRelationship(result.display, turn + 1);
-
+    busy = false;
     if (result.gameOutcome) {
       showOutcome(result.gameOutcome);
     } else {
       renderActions(game.getAvailableActions());
     }
   } catch (err) {
+    busy = false;
     setStatus(`Error: ${err.message}`, true);
     console.error(err);
     renderActions(game.getAvailableActions());
-  } finally {
-    busy = false;
   }
 }
 
