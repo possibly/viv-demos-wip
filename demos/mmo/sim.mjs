@@ -681,12 +681,22 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
             const a = state.entities[id];
             const evType = (a.name === "loot-item" || a.name === "equip-item") ? "loot" : "victory";
             events.push({ text: a.report ?? a.gloss ?? "(action)", type: evType });
+            if (a.name === "loot-item" && lootItemId) {
+              const item = state.entities[lootItemId];
+              if (item) {
+                adventurer.inventory = [...(adventurer.inventory ?? []), item];
+              }
+            }
             if (a.name === "equip-item" && lootItemId) {
               const slot = adventurer.pendingEquipSlot;
               const item = state.entities[lootItemId];
               if (slot && item) {
+                const displaced = adventurer.equipment[slot];
+                if (displaced) {
+                  adventurer.inventory = [...(adventurer.inventory ?? []), { ...displaced, slot }];
+                }
                 adventurer.equipment[slot] = { name: item.name, powerLevel: item.powerLevel };
-                adventurer.inventory = [...(adventurer.inventory ?? []), item];
+                adventurer.inventory = (adventurer.inventory ?? []).filter(i => i !== item);
               }
             }
           });
@@ -745,6 +755,9 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
                 events.push({ text: a.report ?? a.gloss ?? "(action)", type: "loot" });
               });
 
+              // All chest items go to inventory first; equip-item will move upgrades to equipment.
+              adventurer.inventory = [...(adventurer.inventory ?? []), item];
+
               // Drain urgent: equip-item fires if loot-chest queued it (item is an upgrade).
               while (true) {
                 const urgentBefore = new Set(state.actions);
@@ -756,8 +769,12 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
                   events.push({ text: a.report ?? a.gloss ?? "(action)", type: "loot" });
                   if (a.name === "equip-item") {
                     const slot = item.slot;
+                    const displaced = adventurer.equipment[slot];
+                    if (displaced) {
+                      adventurer.inventory = [...(adventurer.inventory ?? []), { ...displaced, slot }];
+                    }
                     adventurer.equipment[slot] = { name: item.name, powerLevel: item.powerLevel };
-                    adventurer.inventory = [...(adventurer.inventory ?? []), item];
+                    adventurer.inventory = (adventurer.inventory ?? []).filter(i => i !== item);
                   }
                 });
               }
