@@ -106,6 +106,42 @@ reserved action look-around:
         @adventurer.canScout
         !(@adventurer.questActive && @adventurer.questEnemyFound && !@adventurer.questHuntDone)
 
+reserved action sell-items:
+    gloss: "@adventurer sells items to a vendor"
+    roles:
+        @adventurer:
+            as: initiator
+    conditions:
+        @adventurer.canSellItems
+
+reserved action buy-item:
+    gloss: "@adventurer buys an item from a vendor"
+    roles:
+        @adventurer:
+            as: initiator
+    conditions:
+        @adventurer.canBuyItem
+
+reserved action purchase-item:
+    gloss: "@adventurer purchases @item from @vendor"
+    roles:
+        @adventurer:
+            as: initiator
+        @item:
+            as: item
+        @vendor:
+            as: recipient
+    effects:
+        @adventurer.pendingLootId = false
+    reactions:
+        if @adventurer.shouldEquipLoot:
+            queue action equip-item:
+                with:
+                    @adventurer: @adventurer
+                    @item: @item
+                urgent: true
+        end
+
 reserved action level-up:
     gloss: "@adventurer reaches level {@adventurer.pendingLevel}"
     roles:
@@ -253,10 +289,20 @@ reserved action complete-quest:
 // While on an active quest the adventurer follows a strict priority order:
 // travel to the quest zone → scout for the enemy → fight → return to giver.
 // When no quest is active, or all quest actions are ineligible, normal free-roaming applies.
+// Vendor interactions (sell then buy) are tried between quest duties and free-roaming.
 action-selector pick-activity:
     target in order:
         selector quest-directed;
+        selector vendor-interaction;
         selector free-roaming;
+
+reserved action-selector vendor-interaction:
+    roles:
+        @adventurer:
+            as: initiator
+    target in order:
+        sell-items;
+        buy-item;
 
 reserved action-selector quest-directed:
     roles:

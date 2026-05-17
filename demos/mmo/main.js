@@ -1,5 +1,5 @@
 import { initializeVivRuntime, selectAction, attemptAction, tickPlanner, EntityType } from "../../shared/viv-runtime.js";
-import { runSim, CLASS_DATA, ZONES, ENEMY_TEMPLATES, ZONE_ENEMIES, LEVEL_XP_MIN, LEVEL_CAP, FACTIONS, RACE_LABELS, EQUIPMENT_SLOTS, SLOT_LABELS, QUEST_GIVER, ALL_QUEST_GIVERS, QUESTS, QUEST_ITEMS, copperToString } from "./sim.mjs";
+import { runSim, CLASS_DATA, ZONES, ENEMY_TEMPLATES, ZONE_ENEMIES, LEVEL_XP_MIN, LEVEL_CAP, FACTIONS, RACE_LABELS, EQUIPMENT_SLOTS, SLOT_LABELS, QUEST_GIVER, ALL_QUEST_GIVERS, ALL_VENDORS, QUESTS, QUEST_ITEMS, copperToString } from "./sim.mjs";
 
 const runtime = { initializeVivRuntime, selectAction, attemptAction, tickPlanner, EntityType };
 let cachedBundle = null;
@@ -204,7 +204,12 @@ function renderZonemap(currentLocationID, discoveredNPCs) {
       ? `<div class="zone-quest-giver">${knownGivers.map(qg => `<span class="zone-npc">&#x1F4DC; ${qg.name}</span>`).join("")}</div>`
       : "";
 
-    el.innerHTML = `<span class="zone-name">${z.name}</span><span class="zone-desc">${z.desc}</span>${enemyHTML}${giverHTML}`;
+    const knownVendors = ALL_VENDORS.filter(v => v.location === z.id && knownHere.includes(v.id));
+    const vendorHTML = knownVendors.length > 0
+      ? `<div class="zone-vendor">${knownVendors.map(v => `<span class="zone-npc" style="color:#7eb8a8">&#x1F6D2; ${v.name}</span>`).join("")}</div>`
+      : "";
+
+    el.innerHTML = `<span class="zone-name">${z.name}</span><span class="zone-desc">${z.desc}</span>${enemyHTML}${giverHTML}${vendorHTML}`;
     zonemapEl.appendChild(el);
   }
 }
