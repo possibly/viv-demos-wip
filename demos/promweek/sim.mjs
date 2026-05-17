@@ -70,17 +70,18 @@ export const ACTIONS = [
   { name: "small-talk",  label: "Make small talk",   desc: "Keep it casual." },
   { name: "compliment",  label: "Give a compliment", desc: "Say something nice." },
   { name: "ask-opinion", label: "Ask their opinion", desc: "Get Jordan's take on something." },
-  { name: "debate",      label: "Push back",         desc: "Challenge Jordan on something." },
+  { name: "debate",      label: "Push back",         desc: "Challenge Jordan on something they said." },
   { name: "flirt",       label: "Flirt",             desc: "Try your luck." },
   { name: "apologize",   label: "Apologize",         desc: "Clear the air. Needs something to apologize for." },
   { name: "confide",     label: "Confide something", desc: "Share something personal." },
   { name: "invite-out",  label: "Invite them out",   desc: "Ask Jordan if they want to grab food." },
 ];
 
-// Mirrors the one Viv-side gating condition that matters for UI display.
-// Viv enforces the rule; this just lets us lock the button before the click.
+// Mirrors Viv-side gating conditions that matter for UI display.
+// Viv enforces the rules; this just lets us lock the button before the click.
 const UI_AVAILABILITY = {
   "apologize": (rel) => (rel.tension ?? 0) > 20,
+  "debate":    (rel) => rel.hasSaid === true,
 };
 
 export function getAvailableActions(rel) {
@@ -98,6 +99,7 @@ const INITIAL_REL = {
   romance:    0,
   trust:      15,
   tension:    10,
+  hasSaid:    false,
 };
 
 function buildInitialState(EntityType) {
