@@ -1,5 +1,5 @@
 import { initializeVivRuntime, selectAction, attemptAction, tickPlanner, EntityType } from "../../shared/viv-runtime.js";
-import { runSim, CLASS_DATA, ZONES, ENEMY_TEMPLATES, ZONE_ENEMIES, LEVEL_XP_MIN, LEVEL_CAP, FACTIONS, RACE_LABELS, EQUIPMENT_SLOTS, SLOT_LABELS, QUEST_GIVER, QUESTS } from "./sim.mjs";
+import { runSim, CLASS_DATA, ZONES, ENEMY_TEMPLATES, ZONE_ENEMIES, LEVEL_XP_MIN, LEVEL_CAP, FACTIONS, RACE_LABELS, EQUIPMENT_SLOTS, SLOT_LABELS, QUEST_GIVER, QUESTS, copperToString } from "./sim.mjs";
 
 const runtime = { initializeVivRuntime, selectAction, attemptAction, tickPlanner, EntityType };
 let cachedBundle = null;
@@ -56,6 +56,11 @@ function renderCharCard(char) {
     ? `<div class="char-quest"><span class="quest-name">${qs.name}</span><span class="quest-phase">${qs.phase}</span></div>`
     : "";
 
+  const copper = char.copper ?? 0;
+  const copperHTML = copper > 0
+    ? `<div class="char-copper" style="color:#b89c5a;font-size:0.78rem">&#x1F4B0; ${copperToString(copper)}</div>`
+    : "";
+
   charCardEl.innerHTML = `
     <div class="char-portrait" style="border-color: ${cd.color}">
       <span class="char-icon">${cd.icon}</span>
@@ -68,6 +73,7 @@ function renderCharCard(char) {
         <span>${RACE_LABELS[char.race]}</span>
       </div>
       <div class="char-level">Level ${level} · ${xpText}</div>
+      ${copperHTML}
       ${questHTML}
     </div>`;
 }
@@ -82,6 +88,7 @@ function renderModal(char) {
   const xpText = nextXP !== null ? `${xp} / ${nextXP}` : `${xp} (max)`;
   const className = char.class.charAt(0).toUpperCase() + char.class.slice(1);
 
+  const copper = char.copper ?? 0;
   const statsRows = [
     ["Class",   `<span style="color:${cd.color}">${className}</span>`],
     ["Race",    RACE_LABELS[char.race]],
@@ -89,6 +96,7 @@ function renderModal(char) {
     ["Faction", `<span style="color:${factionColor}">${char.faction}</span>`],
     ["Level",   String(level)],
     ["XP",      xpText],
+    ["Gold",    `<span style="color:#b89c5a">${copperToString(copper)}</span>`],
   ].map(([k, v]) => `<tr><td class="col-label">${k}</td><td>${v}</td></tr>`).join("");
 
   const equipRows = EQUIPMENT_SLOTS.map(slot => {
@@ -97,6 +105,19 @@ function renderModal(char) {
     if (!item) return `<tr><td class="col-label col-muted">${label}</td><td class="col-muted">—</td><td class="col-power col-muted">—</td></tr>`;
     return `<tr><td class="col-label">${label}</td><td>${item.name}</td><td class="col-power">${item.powerLevel}</td></tr>`;
   }).join("");
+
+  const inventory = char.inventory ?? [];
+  const inventoryRows = inventory.length === 0
+    ? `<tr><td colspan="2" class="col-muted" style="font-style:italic">No items yet</td></tr>`
+    : inventory.map(item => `<tr><td>${item.name}</td><td class="col-power">${item.powerLevel}</td></tr>`).join("");
+  const inventorySectionHTML = `
+    <div class="modal-section">
+      <div class="modal-section-title">Inventory</div>
+      <table class="modal-table">
+        <thead><tr><td class="col-head">Item</td><td class="col-power col-head">Power</td></tr></thead>
+        <tbody>${inventoryRows}</tbody>
+      </table>
+    </div>`;
 
   const activeQuest = char.questActive ? QUESTS.find(q => q.id === char.questId) : null;
   const completedQuestNames = (char.completedQuests ?? []).map(id => QUESTS.find(q => q.id === id)?.name ?? id);
@@ -148,6 +169,7 @@ function renderModal(char) {
         <tbody>${equipRows}</tbody>
       </table>
     </div>
+    ${inventorySectionHTML}
     ${questSectionHTML}
     <div class="modal-section">
       <div class="modal-section-title">Known Factions</div>

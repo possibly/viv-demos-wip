@@ -146,16 +146,55 @@ function initialFactionRep(factionId) {
 }
 
 export const ENEMY_TEMPLATES = {
-  grimspawn_scout:    { id: "grimspawn_scout",    name: "Grimspawn Scout",    faction: ENEMY_FACTION.id, level: 1, powerLevel: 1, xpReward: 50,  discoveryRate: 1.0 },
-  grimspawn_warrior:  { id: "grimspawn_warrior",  name: "Grimspawn Warrior",  faction: ENEMY_FACTION.id, level: 2, powerLevel: 1, xpReward: 100, discoveryRate: 1.0 },
-  grimspawn_enforcer: { id: "grimspawn_enforcer", name: "Grimspawn Enforcer", faction: ENEMY_FACTION.id, level: 3, powerLevel: 1, xpReward: 200, discoveryRate: 1.0 },
+  grimspawn_scout:    { id: "grimspawn_scout",    name: "Grimspawn Scout",    faction: ENEMY_FACTION.id, type: "humanoid", level: 1, powerLevel: 1, xpReward: 50,  discoveryRate: 1.0 },
+  grimspawn_warrior:  { id: "grimspawn_warrior",  name: "Grimspawn Warrior",  faction: ENEMY_FACTION.id, type: "humanoid", level: 2, powerLevel: 1, xpReward: 100, discoveryRate: 1.0 },
+  grimspawn_enforcer: { id: "grimspawn_enforcer", name: "Grimspawn Enforcer", faction: ENEMY_FACTION.id, type: "humanoid", level: 3, powerLevel: 1, xpReward: 200, discoveryRate: 1.0 },
+  grimspawn_captain:  { id: "grimspawn_captain",  name: "Grimspawn Captain",  faction: ENEMY_FACTION.id, type: "humanoid", level: 4, powerLevel: 2, xpReward: 350, discoveryRate: 1.0 },
+  grimspawn_warlord:  { id: "grimspawn_warlord",  name: "Grimspawn Warlord",  faction: ENEMY_FACTION.id, type: "humanoid", level: 5, powerLevel: 2, xpReward: 500, discoveryRate: 1.0 },
 };
 
 export const ZONE_ENEMIES = {
   briar_edge: ["grimspawn_scout", "grimspawn_warrior"],
   stonewick:  ["grimspawn_scout"],
-  stillwater: ["grimspawn_warrior", "grimspawn_enforcer"],
+  stillwater: ["grimspawn_warrior", "grimspawn_enforcer", "grimspawn_captain", "grimspawn_warlord"],
 };
+
+export const WEAK_LOOT_ITEMS = [
+  { name: "Tattered Cloth Hood",     powerLevel: 1 },
+  { name: "Worn Leather Gloves",     powerLevel: 1 },
+  { name: "Rusty Iron Knife",        powerLevel: 1 },
+  { name: "Crude Wooden Club",       powerLevel: 1 },
+  { name: "Frayed Linen Bracers",    powerLevel: 1 },
+  { name: "Battered Iron Helm",      powerLevel: 2 },
+  { name: "Scratched Leather Boots", powerLevel: 2 },
+  { name: "Chipped Short Sword",     powerLevel: 2 },
+  { name: "Old Iron Mace",           powerLevel: 2 },
+  { name: "Dented Iron Shield",      powerLevel: 2 },
+  { name: "Rough-spun Chain Coif",   powerLevel: 3 },
+  { name: "Scuffed Iron Pauldrons",  powerLevel: 3 },
+  { name: "Notched Broadsword",      powerLevel: 3 },
+  { name: "Crude Iron Axe",          powerLevel: 3 },
+  { name: "Pitted Iron Gauntlets",   powerLevel: 3 },
+];
+
+export function copperToString(total) {
+  const gold   = Math.floor(total / 10000);
+  const silver = Math.floor((total % 10000) / 100);
+  const copper = total % 100;
+  const parts  = [];
+  if (gold   > 0) parts.push(`${gold}g`);
+  if (silver > 0) parts.push(`${silver}s`);
+  if (copper > 0) parts.push(`${copper}c`);
+  return parts.length > 0 ? parts.join(" ") : "0c";
+}
+
+function generateLoot(rng, enemy) {
+  const result = { copper: 0, item: null };
+  if (enemy.type !== "humanoid" || enemy.level > 5) return result;
+  if (rng() < 0.4) result.copper = Math.floor(rng() * 3) + 1;
+  if (rng() < 0.3) result.item = pickRandom(rng, WEAK_LOOT_ITEMS);
+  return result;
+}
 
 export const EQUIPMENT_SLOTS = [
   "head","neck","shoulders","chest","back","wrist","hands","waist","legs","feet",
@@ -239,6 +278,8 @@ function generateCharacter(EntityType, rng) {
     location: ZONES[0].id,
     memories: {},
     level: 1, xp: 0,
+    copper: 0,
+    inventory: [],
     equipment: getStarterEquipment(classKey, raceKey),
     factionRelationships: {},
     discoveredEnemies: {},
@@ -297,7 +338,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       entityType: EntityType.Character,
       id, name: template.name, location: zoneId,
       alive: true, level: template.level, powerLevel: template.powerLevel,
-      xpReward: template.xpReward, templateId, faction: template.faction, memories: {},
+      xpReward: template.xpReward, templateId, type: template.type, faction: template.faction, memories: {},
     };
     state.characters.push(id);
     if (!state.zoneEnemyStacks[zoneId]) state.zoneEnemyStacks[zoneId] = [];
@@ -460,6 +501,16 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
           const a = state.entities[id];
           events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
         });
+
+        const loot = generateLoot(rng, enemy);
+        if (loot.copper > 0) {
+          adventurer.copper = (adventurer.copper ?? 0) + loot.copper;
+          events.push({ text: `${adventurer.name} picks up ${loot.copper} copper.`, type: "loot" });
+        }
+        if (loot.item) {
+          adventurer.inventory = [...(adventurer.inventory ?? []), loot.item];
+          events.push({ text: `${adventurer.name} finds a ${loot.item.name} (power ${loot.item.powerLevel})!`, type: "loot" });
+        }
       } else {
         const retreatBefore = new Set(state.actions);
         await attemptAction({ actionName: "retreat", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
@@ -539,5 +590,6 @@ export function summarize(tick) {
   const c = tick.character;
   const loc = ZONES.find(z => z.id === c.location)?.name ?? c.location;
   const questPart = c.questActive ? ` [Quest: ${c.questKillsDone ?? 0}/${c.questKillsNeeded ?? 0}]` : "";
-  return `${c.name} (${c.class}, Lv.${c.level ?? 1}, ${c.xp ?? 0} XP) @ ${loc}${questPart}`;
+  const copperPart = (c.copper ?? 0) > 0 ? ` [${copperToString(c.copper)}]` : "";
+  return `${c.name} (${c.class}, Lv.${c.level ?? 1}, ${c.xp ?? 0} XP) @ ${loc}${questPart}${copperPart}`;
 }

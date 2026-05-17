@@ -280,6 +280,7 @@ main { padding: 1.25rem; max-width: 700px; }
 .event-entry.retreat  { color: #c07070; }
 .event-entry.scouting { color: #8ab8d4; }
 .event-entry.quest    { color: #d4af37; }
+.event-entry.loot     { color: #b89c5a; font-style: italic; }
 
 /* Modal */
 .modal {
