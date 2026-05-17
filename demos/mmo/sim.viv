@@ -1,9 +1,16 @@
 // MMO Starter World — each tick, the adventurer's activity is chosen by the pick-activity selector.
-// fight is gated on having discovered enemies in the current zone; look-around requires undiscovered ones.
+// fight is gated on having discovered enemies in the current zone.
+// look-around requires undiscovered enemies or an undiscovered quest giver, but is suppressed
+// during the quest hunt phase so the adventurer focuses on killing, not further scouting.
 // kill, retreat, and level-up fire immediately as reserved actions on the same timestep as fight.
 // Enemies are spawned as viv item entities and persist on a per-zone stack until killed.
 // accept-quest fires when the adventurer meets a quest giver and is eligible for the next quest.
 // The quest-hunt plan drives the adventurer through finding, killing, returning, and completing a quest.
+// While on a quest the pick-activity selector delegates to quest-directed first:
+//   - travel-to-quest-zone moves the adventurer to the target zone if they aren't already there.
+//   - look-around finds the quest target enemy once the adventurer arrives.
+//   - fight keeps the adventurer fighting the quest target until the kill count is met.
+//   - return-to-quest-giver moves the adventurer back to the quest giver after all kills are done.
 
 reserved action wander:
     gloss: "@adventurer wanders into @destination"
@@ -14,6 +21,36 @@ reserved action wander:
             as: location, anywhere
     conditions:
         @destination != @adventurer.location
+    effects:
+        @adventurer.location = @destination
+
+reserved action travel-to-quest-zone:
+    gloss: "@adventurer heads to @destination to pursue the quest"
+    roles:
+        @adventurer:
+            as: initiator
+        @destination:
+            as: location, anywhere
+            is: @adventurer.questTargetZone?
+    conditions:
+        @adventurer.questActive
+        !@adventurer.questHuntDone
+        @adventurer.location != @adventurer.questTargetZone
+    effects:
+        @adventurer.location = @destination
+
+reserved action return-to-quest-giver:
+    gloss: "@adventurer heads back to @destination to turn in the quest"
+    roles:
+        @adventurer:
+            as: initiator
+        @destination:
+            as: location, anywhere
+            is: @adventurer.questGiverLocation?
+    conditions:
+        @adventurer.questActive
+        @adventurer.questHuntDone
+        !@adventurer.questReadyToComplete
     effects:
         @adventurer.location = @destination
 
@@ -59,6 +96,7 @@ reserved action look-around:
             as: initiator
     conditions:
         @adventurer.canScout
+        !(@adventurer.questActive && @adventurer.questEnemyFound && !@adventurer.questHuntDone)
 
 reserved action level-up:
     gloss: "@adventurer reaches level {@adventurer.pendingLevel}"
@@ -84,6 +122,7 @@ reserved action accept-quest:
     effects:
         @adventurer.questActive = true
         @adventurer.questKillsDone = 0
+        @adventurer.questGiverLocation = @questGiver.location
     reactions:
         queue plan quest-hunt:
             with:
@@ -141,10 +180,27 @@ reserved action complete-quest:
                 urgent: true
         end
 
+// While on an active quest the adventurer follows a strict priority order:
+// travel to the quest zone → scout for the enemy → fight → return to giver.
+// When no quest is active, or all quest actions are ineligible, normal free-roaming applies.
 action-selector pick-activity:
+    target in order:
+        selector quest-directed;
+        selector free-roaming;
+
+reserved action-selector quest-directed:
     roles:
         @adventurer:
             as: initiator
+    conditions:
+        @adventurer.questActive
+    target in order:
+        travel-to-quest-zone;
+        return-to-quest-giver;
+        look-around;
+        fight;
+
+reserved action-selector free-roaming:
     target with weights:
         (1) wander;
         (1) fight;
