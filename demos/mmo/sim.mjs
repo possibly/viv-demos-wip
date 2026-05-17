@@ -381,10 +381,13 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     }
 
     const inReturnPhase = adventurer.questActive && adventurer.questHuntDone && !adventurer.questReadyToComplete;
+    const inQuestTravelPhase = adventurer.questActive && !adventurer.questHuntDone && locationID !== adventurer.questTargetZone;
+    const inQuestScoutPhase = adventurer.questActive && !adventurer.questEnemyFound && locationID === adventurer.questTargetZone;
+    const inQuestHuntPhase = adventurer.questActive && adventurer.questEnemyFound && !adventurer.questHuntDone && locationID === adventurer.questTargetZone;
 
-    // Suppress fighting during the return phase; look-around works anywhere there's something new
-    adventurer.canFight = discoveredHere.length > 0 && !inReturnPhase;
-    adventurer.canScout = undiscoveredEnemies.length > 0 || hasUndiscoveredQuestGiver;
+    // Suppress fighting/scouting in phases where the player should be doing something else
+    adventurer.canFight = discoveredHere.length > 0 && !inReturnPhase && !inQuestTravelPhase && !inQuestScoutPhase;
+    adventurer.canScout = (undiscoveredEnemies.length > 0 || hasUndiscoveredQuestGiver) && !inQuestHuntPhase;
 
     const events = [];
 
@@ -426,6 +429,75 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         const a = state.entities[id];
         events.push({ text: a.report ?? a.gloss ?? "(action)", type: "quest" });
       });
+    } else if (inQuestTravelPhase) {
+      // Directed travel to the quest target zone
+      const travelBindings = { adventurer: ["adventurer"], destination: [adventurer.questTargetZone] };
+      const travelBefore = new Set(state.actions);
+      await attemptAction({ actionName: "wander", initiatorID: "adventurer", precastBindings: travelBindings, suppressConditions: true });
+      state.actions.filter(id => !travelBefore.has(id)).forEach(id => {
+        const a = state.entities[id];
+        events.push({ text: a.report ?? a.gloss ?? "(action)", type: "quest" });
+      });
+    } else if (inQuestScoutPhase) {
+      // Scout specifically for the quest target enemy
+      const questTarget = adventurer.questTargetTemplate;
+      const lookBefore = new Set(state.actions);
+      await attemptAction({ actionName: "look-around", initiatorID: "adventurer", suppressConditions: true });
+      state.actions.filter(id => !lookBefore.has(id)); // record action without pushing gloss
+      const enemy = ENEMY_TEMPLATES[questTarget];
+      if (rng() < enemy.discoveryRate) {
+        if (!adventurer.discoveredEnemies[locationID]) adventurer.discoveredEnemies[locationID] = [];
+        adventurer.discoveredEnemies[locationID].push(questTarget);
+        const factionId = enemy.faction;
+        const newFaction = !(factionId in adventurer.factionRelationships);
+        if (newFaction) adventurer.factionRelationships[factionId] = initialFactionRep(factionId);
+        const factionNote = newFaction ? ` ${FACTIONS[factionId]?.name ?? factionId} added to known factions.` : "";
+        events.push({ text: `${adventurer.name} spots a level ${enemy.level} ${enemy.name} in ${zoneName}.${factionNote}`, type: "scouting" });
+      } else {
+        events.push({ text: `${adventurer.name} searches ${zoneName} for the ${enemy.name} but finds nothing unusual.`, type: "scouting" });
+      }
+    } else if (inQuestHuntPhase) {
+      // Force combat exclusively against the quest target
+      const templateId = adventurer.questTargetTemplate;
+      let enemyId = firstAliveEnemyOfTemplate(locationID, templateId);
+      if (!enemyId) enemyId = spawnEnemy(templateId, locationID);
+      const enemy = state.entities[enemyId];
+
+      const avgPower = getAvgEquipmentPower(adventurer);
+      const winChance = combatWinChance(adventurer.level, avgPower, enemy.level, enemy.powerLevel);
+      const playerWins = rng() < winChance;
+
+      adventurer.pendingXpReward = Math.min(enemy.xpReward, Math.max(0, xpCap - adventurer.xp));
+      adventurer.pendingLevel = Math.min(getLevel(adventurer.xp + adventurer.pendingXpReward), LEVEL_CAP);
+
+      const combatBindings = { adventurer: ["adventurer"], enemy: [enemyId] };
+
+      if (playerWins) {
+        const killBefore = new Set(state.actions);
+        await attemptAction({ actionName: "kill", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
+        state.actions.filter(id => !killBefore.has(id)).forEach(id => {
+          const a = state.entities[id];
+          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
+        });
+
+        if (adventurer.questActive && enemy.templateId === templateId && templateId === adventurer.questTargetTemplate) {
+          adventurer.questKillsDone = (adventurer.questKillsDone ?? 0) + 1;
+        }
+
+        const levelUpBefore = new Set(state.actions);
+        await selectAction({ initiatorID: "adventurer", urgentOnly: true });
+        state.actions.filter(id => !levelUpBefore.has(id)).forEach(id => {
+          const a = state.entities[id];
+          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
+        });
+      } else {
+        const retreatBefore = new Set(state.actions);
+        await attemptAction({ actionName: "retreat", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
+        state.actions.filter(id => !retreatBefore.has(id)).forEach(id => {
+          const a = state.entities[id];
+          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "retreat" });
+        });
+      }
     } else {
       // Normal activity selection (also fires complete-quest when queued by plan)
       const actionsBefore = new Set(state.actions);
