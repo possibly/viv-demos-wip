@@ -10,70 +10,34 @@
   <header>
     <a href="../../" class="back">← demos</a>
     <h1>Promweek</h1>
-    <p class="subtitle" id="subtitle">Northside High · Near the lockers · Third period</p>
+    <p class="subtitle" id="subtitle">Northside High · the week before prom</p>
     <div class="scene-bar">
-      <span id="scene-label" class="scene-label">Loading…</span>
-      <button id="scene-switch" class="scene-switch">Switch scenes</button>
+      <span id="act-label" class="scene-label">Act 1 · Loading…</span>
+      <span id="turn-count" class="turn-count">Turn 0</span>
     </div>
   </header>
 
   <main>
     <p id="status" class="status" hidden></p>
 
-    <!-- Characters -->
-    <section class="characters">
+    <!-- Alex card -->
+    <section class="alex-section">
       <div class="char-card you">
         <div class="char-portrait">😎</div>
-        <div class="char-name">Alex</div>
-        <div class="char-role">You</div>
+        <div class="char-name">Alex <span class="char-role">(you)</span></div>
         <ul class="char-traits">
-          <li>Charismatic</li>
-          <li>Ambitious</li>
-          <li>A little impulsive</li>
+          <li>charismatic</li>
+          <li>ambitious</li>
+          <li>impulsive</li>
         </ul>
       </div>
-
-      <div class="scene-divider">
-        <span class="scene-vs">VS</span>
-      </div>
-
-      <div class="char-card jordan">
-        <div class="char-portrait" id="jordan-mood">😐</div>
-        <div class="char-name">Jordan</div>
-        <div class="char-role">Target</div>
-        <ul class="char-traits">
-          <li>Intellectual</li>
-          <li>Guarded</li>
-          <li>Values authenticity</li>
-        </ul>
-      </div>
+      <div class="alex-statuses" id="alex-statuses"></div>
     </section>
 
-    <!-- Relationship status -->
-    <section class="relationship">
-      <div class="rel-row">
-        <span class="rel-key">Vibe</span>
-        <span class="pill vibe-1" id="vibe-label">Just classmates</span>
-      </div>
-      <div class="rel-row">
-        <span class="rel-key">Spark</span>
-        <span class="pill spark-0" id="spark-label">No spark</span>
-      </div>
-      <div class="rel-row">
-        <span class="rel-key">Tension</span>
-        <span class="pill tension-0" id="tension-label">Comfortable</span>
-      </div>
-
-      <div class="goal-row">
-        <div class="goal-label">
-          <span>Prom date potential</span>
-          <span id="turn-count" class="turn-count">Turn 0</span>
-        </div>
-        <div class="goal-bar">
-          <div class="goal-fill" id="goal-fill" style="width:10%"></div>
-        </div>
-        <div class="goal-text" id="goal-text">Cold start</div>
-      </div>
+    <!-- Social cast -->
+    <section class="cast">
+      <div class="cast-header">The cast</div>
+      <div class="cast-grid" id="cast-grid"></div>
     </section>
 
     <!-- Conversation log -->
@@ -83,9 +47,16 @@
     </section>
 
     <!-- Action panel -->
-    <section class="action-panel">
-      <div class="action-header">Your move — choose an action</div>
-      <div class="actions" id="actions"></div>
+    <section class="action-panel" id="action-panel">
+      <div class="action-header">
+        <span>Your move</span>
+        <span class="hint" id="action-hint">Pick a target, then an intent</span>
+      </div>
+      <div class="target-row" id="target-row"></div>
+      <div class="intent-row" id="intent-row"></div>
+      <div class="commit-row">
+        <button id="commit-btn" class="commit-btn" disabled>Make your move</button>
+      </div>
     </section>
 
     <!-- Outcome overlay -->
