@@ -1,535 +1,934 @@
-// Promweek — one scene between Alex and Jordan, driven by Jordan's volition.
+// Promweek — two-act high school social physics.
 //
-// Two scene variants pre-set Jordan's volition before any player turn:
-//   #PURSUIT (easier) — Jordan is quietly hoping Alex will pursue them.
-//                      Reciprocation comes sooner, flirting lands faster,
-//                      missteps cost less.
-//   #GUARDED (harder) — Jordan was burned recently. They'll give Alex a fair
-//                      chance, but romance and trust accrete slowly and the
-//                      pull-back reaction is much more common.
+// The player guides Alex through the week before prom (Act 1, at school) and
+// through prom night itself (Act 2, at the prom). Each turn, the player picks
+// a target and a high-level intent (#WARM, #SPICY, #BOLD, #MEND). Viv then
+// selects the specific social exchange that fires, based on:
 //
-// Each player click resolves as a parent "intent" action whose reactions queue
-//   1. an outcome action-selector that picks the right variant (urgent), then
-//   2. a Jordan response action-selector that picks Jordan's reaction (urgent).
+//   * Relationships — binary, reciprocal, public  ("friends" | "dating" | "enemies")
+//   * Social networks — scalar, non-reciprocal, private  (buddy, romance, cool, tension)
+//   * Statuses — temporary feelings & social standing  (popular, has-crush[X])
+//   * Traits — permanent personality attributes  (intellectual, vain, loyal, ...)
+//   * Social fact database — the chronicle of past actions
+//   * Cultural knowledge base — items with zeitgeist coolness + per-character likes/dislikes
 //
-// Both the outcome variants and Jordan's reactions reference @jordan.volition
-// in their conditions, so the volition genuinely changes who-fires-when —
-// not just the size of a delta. All relationship effects live in Viv effects
-// blocks; the host only renders narrative variation.
+// All action selection happens in Viv via the `select-exchange` selector chain.
+// The host only sets `@alex.intent` from the player's UI and renders the rest.
 
 
-// ── Scene setup ─────────────────────────────────────────────────────────────
+// ── Player turn entry point ─────────────────────────────────────────────────
 
-reserved action scene-opens-pursuit:
-    gloss: "Jordan is at their locker, glancing over at @alex twice already this morning."
-    roles:
-        @jordan:
-            as: initiator
-        @alex:
-            as: recipient
-    effects:
-        @jordan.volition = #PURSUIT
-
-reserved action scene-opens-guarded:
-    gloss: "Jordan is at their locker. Word in the hallway is something went sideways with someone last month."
-    roles:
-        @jordan:
-            as: initiator
-        @alex:
-            as: recipient
-    effects:
-        @jordan.volition = #GUARDED
-
-
-// ── Intent: small-talk ──────────────────────────────────────────────────────
-
-action small-talk:
-    gloss: "@alex makes small talk with @jordan"
+reserved action player-turn:
+    gloss: "@alex makes a move toward @target"
     roles:
         @alex:
             as: initiator
-        @jordan:
+        @target:
+            as: recipient, precast
+    reactions:
+        queue action-selector select-exchange:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+
+// ── Master exchange selector ────────────────────────────────────────────────
+//
+// Tries sub-selectors in order. Each sub-selector has a `conditions` block
+// gating it on @alex.intent and @alex.act, plus its own ordered candidate list.
+// First selector whose conditions pass AND that successfully targets a
+// candidate is the one that fires. Falls back to awkward-pause.
+
+reserved action-selector select-exchange:
+    roles:
+        @alex:
+            as: initiator
+        @target:
             as: recipient
+    target in order:
+        selector act2-exchanges:
+            with:
+                @alex: @alex
+                @target: @target
+        selector spicy-exchanges:
+            with:
+                @alex: @alex
+                @target: @target
+        selector bold-exchanges:
+            with:
+                @alex: @alex
+                @target: @target
+        selector mend-exchanges:
+            with:
+                @alex: @alex
+                @target: @target
+        selector warm-exchanges:
+            with:
+                @alex: @alex
+                @target: @target
+        awkward-pause:
+            with:
+                @alex: @alex
+                @target: @target
+
+
+// ── ACT 2 exchanges (at the prom) ───────────────────────────────────────────
+
+reserved action-selector act2-exchanges:
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    conditions:
+        @alex.act == #ACT_TWO
+    target in order:
+        public-declaration:
+            with:
+                @alex: @alex
+                @target: @target
+        slow-dance:
+            with:
+                @alex: @alex
+                @target: @target
+        prom-confess:
+            with:
+                @alex: @alex
+                @target: @target
+        ask-to-dance:
+            with:
+                @alex: @alex
+                @target: @target
+        chat-prom:
+            with:
+                @alex: @alex
+                @target: @target
+
+reserved action public-declaration:
+    gloss: "@alex steps onto the dance floor and announces, loud enough for everyone, that @target is the reason they came tonight"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    conditions:
+        @alex.intent == #SPICY
+        @alex.romance[@target.id]? >= 55
     effects:
-        @jordan.friendship += 3
-        if @jordan.tension > 0:
-            @jordan.tension -= 1
+        if @target.romance[@alex.id]? >= 50:
+            @alex.romance[@target.id] += 12
+            @target.romance[@alex.id] += 18
+            @alex.buddy[@target.id] += 6
+            @target.buddy[@alex.id] += 6
+        else:
+            @target.tension[@alex.id] += 25
+            @alex.tension[@target.id] += 15
+            @target.cool[@alex.id] -= 8
         end
     reactions:
-        queue action-selector jordan-responds:
+        queue action-selector target-response:
             with:
-                @jordan: @jordan
+                @target: @target
                 @alex: @alex
             urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
 
-
-// ── Intent: ask-opinion ─────────────────────────────────────────────────────
-
-action ask-opinion:
-    gloss: "@alex asks @jordan for their honest opinion"
+reserved action slow-dance:
+    gloss: "@alex pulls @target close as the slow song starts. Nobody else exists for a minute."
     roles:
         @alex:
             as: initiator
-        @jordan:
-            as: recipient
-    effects:
-        @jordan.respect += 7
-        @jordan.friendship += 3
-    reactions:
-        queue action-selector jordan-responds:
-            with:
-                @jordan: @jordan
-                @alex: @alex
-            urgent: true
-
-
-// ── Intent: debate ──────────────────────────────────────────────────────────
-
-action debate:
-    gloss: "@alex pushes back on something @jordan said"
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
+        @target:
             as: recipient
     conditions:
-        @jordan.hasSaid == true
+        @alex.relationships[@target.id]? == "dating"
+        || (@alex.romance[@target.id]? >= 35 && @target.romance[@alex.id]? >= 25)
     effects:
-        @jordan.respect += 12
-        @jordan.friendship += 5
-        if @jordan.tension > 0:
-            @jordan.tension -= 2
+        @alex.romance[@target.id] += 10
+        @target.romance[@alex.id] += 10
+        @alex.buddy[@target.id] += 4
+        @target.buddy[@alex.id] += 4
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action prom-confess:
+    gloss: '@alex finds a quiet corner with @target. "I should have said this sooner."'
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    conditions:
+        @alex.intent == #SPICY
+        @alex.romance[@target.id]? >= 30
+    effects:
+        if @target.romance[@alex.id]? >= 20:
+            @alex.romance[@target.id] += 9
+            @target.romance[@alex.id] += 9
+            @alex.buddy[@target.id] += 3
+        else:
+            @target.tension[@alex.id] += 10
+            @target.buddy[@alex.id] -= 2
         end
     reactions:
-        queue action-selector jordan-responds:
+        queue action-selector target-response:
             with:
-                @jordan: @jordan
+                @target: @target
                 @alex: @alex
             urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
 
-
-// ── Intent: apologize (gated on tension) ────────────────────────────────────
-
-action apologize:
-    gloss: "@alex apologizes to @jordan"
+reserved action ask-to-dance:
+    gloss: "@alex offers @target a hand on the dance floor"
     roles:
         @alex:
             as: initiator
-        @jordan:
+        @target:
             as: recipient
     conditions:
-        @jordan.tension > 20
+        @alex.buddy[@target.id]? >= 25
+        || @alex.relationships[@target.id]? == "friends"
+        || @alex.relationships[@target.id]? == "dating"
     effects:
-        @jordan.tension -= 18
-        @jordan.trust += 6
-    reactions:
-        queue action-selector jordan-responds:
-            with:
-                @jordan: @jordan
-                @alex: @alex
-            urgent: true
-
-
-// ── Intent: compliment (variant outcomes) ───────────────────────────────────
-
-action compliment:
-    gloss: "@alex compliments @jordan"
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    reactions:
-        queue action-selector compliment-outcome:
-            with:
-                @alex: @alex
-                @jordan: @jordan
-            urgent: true
-        queue action-selector jordan-responds:
-            with:
-                @jordan: @jordan
-                @alex: @alex
-            urgent: true
-
-reserved action-selector compliment-outcome:
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    target in order:
-        compliment-lands:
-            with:
-                @alex: @alex
-                @jordan: @jordan
-        compliment-falls-flat:
-            with:
-                @alex: @alex
-                @jordan: @jordan
-
-reserved action compliment-lands:
-    gloss: "The compliment lands — @jordan looks genuinely surprised, the good kind"
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    conditions:
-        @jordan.friendship >= 30 || @jordan.volition == #PURSUIT
-    effects:
-        @jordan.friendship += 6
-        @jordan.romance += 2
-
-reserved action compliment-falls-flat:
-    gloss: "@jordan smiles the polite-not-pleased smile"
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    effects:
-        @jordan.friendship += 1
-        @jordan.respect -= 3
-
-
-// ── Intent: flirt (variant outcomes — volition matters a lot) ───────────────
-
-action flirt:
-    gloss: "@alex flirts with @jordan"
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    reactions:
-        queue action-selector flirt-outcome:
-            with:
-                @alex: @alex
-                @jordan: @jordan
-            urgent: true
-        queue action-selector jordan-responds:
-            with:
-                @jordan: @jordan
-                @alex: @alex
-            urgent: true
-
-reserved action-selector flirt-outcome:
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    target in order:
-        flirt-clicks:
-            with:
-                @alex: @alex
-                @jordan: @jordan
-        flirt-lands:
-            with:
-                @alex: @alex
-                @jordan: @jordan
-        flirt-falls-flat:
-            with:
-                @alex: @alex
-                @jordan: @jordan
-
-reserved action flirt-clicks:
-    gloss: "The line lands — @jordan actually laughs, a short surprised sound"
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    conditions:
-        @jordan.romance >= 35 || (@jordan.volition == #PURSUIT && @jordan.friendship >= 25)
-    effects:
-        @jordan.romance += 11
-        @jordan.friendship += 3
-
-reserved action flirt-lands:
-    gloss: "The line lands and @jordan looks away first — there's color in their face"
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    conditions:
-        @jordan.romance >= 15 || @jordan.volition == #PURSUIT
-    effects:
-        @jordan.romance += 7
-        @jordan.tension += 3
-
-reserved action flirt-falls-flat:
-    gloss: "@jordan's expression does something careful, a half-smile that keeps @alex at arm's length"
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    effects:
-        @jordan.tension += 14
-        @jordan.friendship -= 2
-
-
-// ── Intent: confide (variant outcomes — trust gated) ────────────────────────
-
-action confide:
-    gloss: "@alex confides something personal to @jordan"
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    reactions:
-        queue action-selector confide-outcome:
-            with:
-                @alex: @alex
-                @jordan: @jordan
-            urgent: true
-        queue action-selector jordan-responds:
-            with:
-                @jordan: @jordan
-                @alex: @alex
-            urgent: true
-
-reserved action-selector confide-outcome:
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    target in order:
-        confide-deepens:
-            with:
-                @alex: @alex
-                @jordan: @jordan
-        confide-too-early:
-            with:
-                @alex: @alex
-                @jordan: @jordan
-
-reserved action confide-deepens:
-    gloss: '@jordan listens without interrupting, then quietly: "I get that"'
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    conditions:
-        @jordan.trust >= 40 || (@jordan.volition == #PURSUIT && @jordan.friendship >= 35)
-    effects:
-        @jordan.trust += 17
-        @jordan.friendship += 11
-        @jordan.romance += 5
-        if @jordan.tension > 0:
-            @jordan.tension -= 4
+        if @target.buddy[@alex.id]? >= 20 || @target.romance[@alex.id]? >= 15:
+            @alex.buddy[@target.id] += 5
+            @target.buddy[@alex.id] += 5
+            @alex.romance[@target.id] += 3
+            @target.romance[@alex.id] += 2
+        else:
+            @alex.tension[@target.id] += 5
+            @target.tension[@alex.id] += 3
         end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
 
-reserved action confide-too-early:
-    gloss: "@jordan absorbs it quietly. They didn't ask for this much, this fast."
+reserved action chat-prom:
+    gloss: "@alex catches @target near the punch table for some easy conversation"
     roles:
         @alex:
             as: initiator
-        @jordan:
+        @target:
             as: recipient
     effects:
-        @jordan.trust += 3
-        @jordan.tension += 6
-
-
-// ── Intent: invite-out (variant outcomes — friendship gated) ────────────────
-
-action invite-out:
-    gloss: "@alex asks @jordan if they want to grab food sometime"
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
+        @alex.buddy[@target.id] += 2
+        @target.buddy[@alex.id] += 2
     reactions:
-        queue action-selector invite-outcome:
+        queue action-selector target-response:
             with:
-                @alex: @alex
-                @jordan: @jordan
-            urgent: true
-        queue action-selector jordan-responds:
-            with:
-                @jordan: @jordan
+                @target: @target
                 @alex: @alex
             urgent: true
 
-reserved action-selector invite-outcome:
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    target in order:
-        invite-accepted:
-            with:
-                @alex: @alex
-                @jordan: @jordan
-        invite-deflected:
-            with:
-                @alex: @alex
-                @jordan: @jordan
 
-reserved action invite-accepted:
-    gloss: 'There is barely a pause. @jordan tilts their head: "I was kind of thinking about that too"'
+// ── SPICY exchanges (Act 1) ─────────────────────────────────────────────────
+
+reserved action-selector spicy-exchanges:
     roles:
         @alex:
             as: initiator
-        @jordan:
+        @target:
             as: recipient
     conditions:
-        (@jordan.friendship >= 55 && @jordan.romance >= 30)
-        || (@jordan.volition == #PURSUIT && @jordan.friendship >= 45)
-    effects:
-        @jordan.friendship += 14
-        @jordan.romance += 9
+        @alex.intent == #SPICY
+    target in order:
+        ask-out:
+            with:
+                @alex: @alex
+                @target: @target
+        flirt-bold:
+            with:
+                @alex: @alex
+                @target: @target
+        confide-secret:
+            with:
+                @alex: @alex
+                @target: @target
+        flirt-soft:
+            with:
+                @alex: @alex
+                @target: @target
 
-reserved action invite-deflected:
-    gloss: '@jordan looks caught off guard. "Maybe sometime," they say. Not a yes.'
+reserved action ask-out:
+    gloss: "@alex asks @target out — proper, eye contact, the whole thing"
     roles:
         @alex:
             as: initiator
-        @jordan:
+        @target:
+            as: recipient
+    conditions:
+        @alex.romance[@target.id]? >= 30
+        @alex.buddy[@target.id]? >= 35
+    effects:
+        if @target.romance[@alex.id]? >= 30 && @target.buddy[@alex.id]? >= 25:
+            @alex.romance[@target.id] += 10
+            @target.romance[@alex.id] += 12
+            @alex.buddy[@target.id] += 5
+            @target.buddy[@alex.id] += 5
+        else:
+            @target.tension[@alex.id] += 18
+            @alex.tension[@target.id] += 10
+            @target.romance[@alex.id] -= 4
+        end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action flirt-bold:
+    gloss: "@alex leans in close and flirts shamelessly with @target"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    conditions:
+        @alex.romance[@target.id]? >= 15
+    effects:
+        if @target.romance[@alex.id]? >= 20 || @target.buddy[@alex.id]? >= 35:
+            @alex.romance[@target.id] += 7
+            @target.romance[@alex.id] += 9
+        else:
+            @target.tension[@alex.id] += 11
+            @target.cool[@alex.id] -= 4
+            @alex.romance[@target.id] -= 2
+        end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action flirt-soft:
+    gloss: "@alex tries a half-smile and a knowing look — testing the water with @target"
+    roles:
+        @alex:
+            as: initiator
+        @target:
             as: recipient
     effects:
-        @jordan.tension += 11
-        @jordan.friendship -= 2
+        if @target.buddy[@alex.id]? >= 25:
+            @alex.romance[@target.id] += 4
+            @target.romance[@alex.id] += 3
+        else:
+            @target.tension[@alex.id] += 4
+        end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action confide-secret:
+    gloss: "@alex tells @target something they haven't told anyone else"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    conditions:
+        @alex.buddy[@target.id]? >= 20
+    effects:
+        if @target.buddy[@alex.id]? >= 25:
+            @alex.buddy[@target.id] += 8
+            @target.buddy[@alex.id] += 10
+            @alex.romance[@target.id] += 4
+            @target.romance[@alex.id] += 3
+        else:
+            @target.tension[@alex.id] += 5
+            @alex.tension[@target.id] += 4
+        end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
 
 
-// ── Jordan's response (action-selector — volition-driven) ───────────────────
+// ── BOLD exchanges (Act 1) ──────────────────────────────────────────────────
+
+reserved action-selector bold-exchanges:
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    conditions:
+        @alex.intent == #BOLD
+    target in order:
+        confront:
+            with:
+                @alex: @alex
+                @target: @target
+        spread-rumor:
+            with:
+                @alex: @alex
+                @target: @target
+        debate-target:
+            with:
+                @alex: @alex
+                @target: @target
+
+reserved action confront:
+    gloss: "@alex confronts @target directly, calling out the elephant in the room"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    conditions:
+        @alex.tension[@target.id]? >= 15
+    effects:
+        @target.tension[@alex.id] += 8
+        @alex.cool[@target.id] += 5
+        @target.cool[@alex.id] += 3
+        if @alex.tension[@target.id]? > 0:
+            @alex.tension[@target.id] -= 6
+        end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action spread-rumor:
+    gloss: "@alex tells anyone who'll listen something unflattering about @target"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    effects:
+        @target.tension[@alex.id] += 14
+        @target.buddy[@alex.id] -= 6
+        @alex.cool[@target.id] -= 3
+        @target.statuses.embarrassed = true
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action debate-target:
+    gloss: "@alex pushes back hard on @target's take. Sparks fly — the productive kind."
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    effects:
+        @alex.cool[@target.id] += 6
+        @target.cool[@alex.id] += 6
+        if @target.buddy[@alex.id]? >= 25:
+            @alex.buddy[@target.id] += 3
+            @target.buddy[@alex.id] += 3
+        else:
+            @target.tension[@alex.id] += 3
+        end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+
+// ── MEND exchanges (Act 1) ──────────────────────────────────────────────────
+
+reserved action-selector mend-exchanges:
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    conditions:
+        @alex.intent == #MEND
+    target in order:
+        apologize-deep:
+            with:
+                @alex: @alex
+                @target: @target
+        sincere-compliment:
+            with:
+                @alex: @alex
+                @target: @target
+
+reserved action apologize-deep:
+    gloss: "@alex apologizes to @target — not the perfunctory kind"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    conditions:
+        @target.tension[@alex.id]? >= 20
+    effects:
+        @target.tension[@alex.id] -= 18
+        @target.buddy[@alex.id] += 6
+        @alex.buddy[@target.id] += 4
+        @target.statuses.embarrassed = false
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action sincere-compliment:
+    gloss: "@alex says something specific and true about @target"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    effects:
+        @alex.buddy[@target.id] += 4
+        @target.buddy[@alex.id] += 6
+        @target.cool[@alex.id] += 3
+        if @target.tension[@alex.id]? > 0:
+            @target.tension[@alex.id] -= 3
+        end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+
+// ── WARM exchanges (Act 1, also serves as fallback in Act 2 if act2 selector
+//    doesn't match) ──────────────────────────────────────────────────────────
+
+reserved action-selector warm-exchanges:
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    target in order:
+        share-interest:
+            with partial:
+                @alex: @alex
+                @target: @target
+        bond-over-lame:
+            with partial:
+                @alex: @alex
+                @target: @target
+        compliment:
+            with:
+                @alex: @alex
+                @target: @target
+        small-talk:
+            with:
+                @alex: @alex
+                @target: @target
+
+reserved action share-interest:
+    gloss: "@alex talks @target's ear off about @item"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+        @item:
+            as: item, anywhere
+            from: @alex.likes
+    conditions:
+        @item in @target.likes
+        @item.coolness >= 0
+    effects:
+        @alex.buddy[@target.id] += 5
+        @target.buddy[@alex.id] += 5
+        @alex.cool[@target.id] += 2
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action bond-over-lame:
+    gloss: "@alex and @target bond over how much they both love @item, which everyone else considers lame"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+        @item:
+            as: item, anywhere
+            from: @alex.likes
+    conditions:
+        @item in @target.likes
+        @item.coolness < 0
+    effects:
+        @alex.buddy[@target.id] += 9
+        @target.buddy[@alex.id] += 9
+        @alex.romance[@target.id] += 2
+        @target.romance[@alex.id] += 2
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action compliment:
+    gloss: "@alex compliments @target"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    effects:
+        @alex.buddy[@target.id] += 3
+        @target.buddy[@alex.id] += 4
+        @target.cool[@alex.id] += 1
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action small-talk:
+    gloss: "@alex makes small talk with @target"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    effects:
+        @alex.buddy[@target.id] += 2
+        @target.buddy[@alex.id] += 2
+        if @target.tension[@alex.id]? > 0:
+            @target.tension[@alex.id] -= 1
+        end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+
+
+// ── Absolute fallback ───────────────────────────────────────────────────────
+
+reserved action awkward-pause:
+    gloss: "@alex hesitates. The moment passes. @target gives a polite half-smile."
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    effects:
+        @alex.tension[@target.id] += 2
+
+
+// ── Target response action-selector ─────────────────────────────────────────
 //
-// Tried in order. The first whose conditions match fires. jordan-neutral is
-// the unconditional fallback at the bottom. The PURSUIT/GUARDED branches
-// expose distinctly different reaction repertoires.
+// After every exchange, the target's reaction is selected. Picks in order:
+// fuming → thrilled → icy → warm → cool (neutral fallback).
 
-reserved action-selector jordan-responds:
+reserved action-selector target-response:
     roles:
-        @jordan:
+        @target:
             as: initiator
         @alex:
             as: recipient
     target in order:
-        jordan-pulls-back:
+        react-fuming:
             with:
-                @jordan: @jordan
+                @target: @target
                 @alex: @alex
-        jordan-deflects:
+        react-thrilled:
             with:
-                @jordan: @jordan
+                @target: @target
                 @alex: @alex
-        jordan-flusters:
+        react-icy:
             with:
-                @jordan: @jordan
+                @target: @target
                 @alex: @alex
-        jordan-reciprocates:
+        react-warm:
             with:
-                @jordan: @jordan
+                @target: @target
                 @alex: @alex
-        jordan-tests-alex:
+        react-cool:
             with:
-                @jordan: @jordan
-                @alex: @alex
-        jordan-warms-up:
-            with:
-                @jordan: @jordan
-                @alex: @alex
-        jordan-neutral:
-            with:
-                @jordan: @jordan
+                @target: @target
                 @alex: @alex
 
-reserved action jordan-pulls-back:
-    gloss: "@jordan's expression goes careful. They glance at their phone like they just remembered something."
+reserved action react-fuming:
+    gloss: "@target's jaw sets. They are not okay. They turn and walk."
     roles:
-        @jordan:
+        @target:
             as: initiator
         @alex:
             as: recipient
     conditions:
-        @jordan.tension >= 50
+        @target.tension[@alex.id]? >= 45
     effects:
-        @jordan.hasSaid = true
-        @jordan.tension += 5
-        @jordan.friendship -= 2
+        @target.tension[@alex.id] += 4
+        @target.buddy[@alex.id] -= 4
+        @alex.tension[@target.id] += 3
 
-reserved action jordan-deflects:
-    gloss: "@jordan changes the subject — gracefully, but it's a wall going up."
+reserved action react-thrilled:
+    gloss: "@target lights up — clearly delighted. They don't even try to hide it."
     roles:
-        @jordan:
+        @target:
             as: initiator
         @alex:
             as: recipient
     conditions:
-        @jordan.volition == #GUARDED && @jordan.romance >= 20 && @jordan.trust < 45
+        @target.romance[@alex.id]? >= 45 && @target.buddy[@alex.id]? >= 40
     effects:
-        @jordan.hasSaid = true
-        @jordan.tension += 4
-        @jordan.romance -= 2
+        @target.romance[@alex.id] += 3
+        @alex.romance[@target.id] += 4
+        @target.buddy[@alex.id] += 2
 
-reserved action jordan-flusters:
-    gloss: '@jordan touches their own hair — small, unconscious. "This isnt as bad as I thought."'
+reserved action react-icy:
+    gloss: "@target's expression shutters. They are politely, conspicuously, done."
     roles:
-        @jordan:
+        @target:
             as: initiator
         @alex:
             as: recipient
     conditions:
-        @jordan.volition == #PURSUIT && @jordan.romance >= 10
+        @target.tension[@alex.id]? >= 20 || @target.buddy[@alex.id]? <= 0
     effects:
-        @jordan.hasSaid = true
-        @jordan.romance += 4
-        @jordan.friendship += 2
+        @target.tension[@alex.id] += 2
+        @alex.cool[@target.id] -= 1
 
-reserved action jordan-reciprocates:
-    gloss: "@jordan glances at @alex once, then twice. When they look away there's color in their face."
+reserved action react-warm:
+    gloss: "@target's whole face softens. They are listening, really listening."
     roles:
-        @jordan:
+        @target:
             as: initiator
         @alex:
             as: recipient
     conditions:
-        @jordan.romance >= 45 && @jordan.friendship >= 50
+        @target.buddy[@alex.id]? >= 30
     effects:
-        @jordan.hasSaid = true
-        @jordan.romance += 5
-        @jordan.trust += 3
+        @target.buddy[@alex.id] += 2
+        @alex.buddy[@target.id] += 2
 
-reserved action jordan-tests-alex:
-    gloss: "@jordan asks a pointed question — testing whether @alex is paying attention or just performing."
+reserved action react-cool:
+    gloss: "@target nods, says the appropriate thing. The conversation continues."
     roles:
-        @jordan:
+        @target:
             as: initiator
         @alex:
+            as: recipient
+    effects:
+        @target.buddy[@alex.id] += 1
+
+
+// ── Trigger rules ───────────────────────────────────────────────────────────
+//
+// `run-triggers` queues every trigger-rule action as an urgent reaction. Each
+// trigger has its own conditions. The drain loop picks off any that fire.
+// Mirrors Prom Week's notion of "trigger rules" running after every exchange.
+
+reserved action run-triggers:
+    gloss: "(triggers)"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    reactions:
+        queue action become-friends:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+        queue action become-dating:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+        queue action become-enemies:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+        queue action set-has-crush:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action become-friends:
+    gloss: "@alex and @target are clearly friends now."
+    roles:
+        @alex:
+            as: initiator
+        @target:
             as: recipient
     conditions:
-        @jordan.volition == #GUARDED && @jordan.friendship >= 25
+        @alex.buddy[@target.id]? >= 45
+        @target.buddy[@alex.id]? >= 45
+        @alex.relationships[@target.id]? != "friends"
+        @alex.relationships[@target.id]? != "dating"
+        @alex.relationships[@target.id]? != "enemies"
     effects:
-        @jordan.hasSaid = true
-        @jordan.respect += 3
+        @alex.relationships[@target.id] = "friends"
+        @target.relationships[@alex.id] = "friends"
 
-reserved action jordan-warms-up:
-    gloss: "@jordan relaxes — just a little. But @alex notices."
+reserved action become-dating:
+    gloss: "@alex and @target are dating."
     roles:
-        @jordan:
-            as: initiator
         @alex:
+            as: initiator
+        @target:
             as: recipient
     conditions:
-        @jordan.friendship >= 25 && @jordan.tension < 40
+        @alex.romance[@target.id]? >= 55
+        @target.romance[@alex.id]? >= 55
+        @alex.buddy[@target.id]? >= 35
+        @target.buddy[@alex.id]? >= 35
+        @alex.relationships[@target.id]? != "dating"
+        @alex.relationships[@target.id]? != "enemies"
     effects:
-        @jordan.hasSaid = true
-        @jordan.friendship += 3
+        @alex.relationships[@target.id] = "dating"
+        @target.relationships[@alex.id] = "dating"
 
-reserved action jordan-neutral:
-    gloss: "@jordan just nods. The conversation continues."
+reserved action become-enemies:
+    gloss: "@alex and @target are openly hostile now."
     roles:
-        @jordan:
-            as: initiator
         @alex:
+            as: initiator
+        @target:
             as: recipient
+    conditions:
+        @alex.tension[@target.id]? >= 55
+        @target.tension[@alex.id]? >= 55
+        @alex.relationships[@target.id]? != "enemies"
+        @alex.relationships[@target.id]? != "dating"
     effects:
-        @jordan.hasSaid = true
+        @alex.relationships[@target.id] = "enemies"
+        @target.relationships[@alex.id] = "enemies"
+
+reserved action set-has-crush:
+    gloss: "@alex has a crush on @target — anyone watching can tell."
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient
+    conditions:
+        @alex.romance[@target.id]? >= 40
+        @alex.statuses.crush[@target.id]? != true
+    effects:
+        @alex.statuses.crush[@target.id] = true
+
+
+// ── Scene-opening actions (called by host on act start) ─────────────────────
+
+reserved action act1-opens:
+    gloss: "Northside High, the cafeteria. Six lunch periods until prom."
+    roles:
+        @alex:
+            as: initiator
+    effects:
+        @alex.act = #ACT_ONE
+
+reserved action act2-opens:
+    gloss: "The gym, transformed. Prom night. The clock is finally running."
+    roles:
+        @alex:
+            as: initiator
+    effects:
+        @alex.act = #ACT_TWO

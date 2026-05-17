@@ -1,15 +1,12 @@
 #!/usr/bin/env node
 // Playwright test for promweek web UI.
 // Serves the repo over HTTP, opens the demo in headless Chromium,
-// simulates clicking action buttons, and reports what Jordan says
-// (or whether the game hangs/errors).
+// drives the new target+intent+commit flow, and asserts each turn
+// produces a log entry.
 //
 // Usage:
-//   node scripts/test-web.mjs [actions...]
-//
-// Examples:
-//   node scripts/test-web.mjs                          # 5 random turns
-//   node scripts/test-web.mjs small-talk flirt confide # specific sequence
+//   node scripts/test-web.mjs                              # 6 random turns
+//   node scripts/test-web.mjs jordan:SPICY sam:WARM ...    # specific sequence
 
 import { chromium } from "playwright";
 import { createServer } from "http";
@@ -20,8 +17,6 @@ import { fileURLToPath } from "url";
 const ROOT = resolve(fileURLToPath(import.meta.url), "../..");
 const PORT = 7432;
 const TURN_TIMEOUT_MS = 8000;
-
-// ── Static file server ───────────────────────────────────────────────────────
 
 const MIME = {
   ".html": "text/html",
@@ -51,10 +46,7 @@ function serve() {
   });
 }
 
-// ── Playwright helpers ───────────────────────────────────────────────────────
-
 async function waitForTurnComplete(page, prevTurnCount, timeout = TURN_TIMEOUT_MS) {
-  // A turn is complete when a new log-entry appears OR an error status appears
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     const entries = await page.locator(".log-entry").count();
@@ -62,22 +54,32 @@ async function waitForTurnComplete(page, prevTurnCount, timeout = TURN_TIMEOUT_M
     if (entries > prevTurnCount || error) return { entries, error };
     await page.waitForTimeout(100);
   }
-  return null; // timed out
+  return null;
 }
 
 async function getLastLogEntry(page) {
   const entries = await page.locator(".log-entry").all();
   if (!entries.length) return null;
   const last = entries[entries.length - 1];
+  const triggerEls = await last.locator(".log-trigger").all();
+  const triggers = [];
+  for (const t of triggerEls) triggers.push((await t.textContent()).trim());
   return {
     turn:     await last.locator(".log-turn").textContent().catch(() => ""),
     player:   await last.locator(".log-player").textContent().catch(() => ""),
-    outcome:  await last.locator(".log-outcome").textContent().catch(() => null),
-    jordan:   await last.locator(".log-jordan").textContent().catch(() => "(missing)"),
+    exchange: await last.locator(".log-exchange").textContent().catch(() => null),
+    response: await last.locator(".log-response").textContent().catch(() => null),
+    triggers,
   };
 }
 
-// ── Main ─────────────────────────────────────────────────────────────────────
+const TARGETS = ["jordan", "riley", "sam", "casey"];
+const INTENTS = ["WARM", "SPICY", "BOLD", "MEND"];
+
+function parseTurn(arg) {
+  const [target, intent] = arg.split(":");
+  return { target, intent };
+}
 
 const requestedActions = process.argv.slice(2);
 
@@ -88,7 +90,6 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage();
 
-// Capture all console messages and uncaught errors
 const consoleLogs = [];
 page.on("console", msg => {
   const type = msg.type();
@@ -107,58 +108,57 @@ console.log("Opening http://127.0.0.1:7432/demos/promweek/index.html\n");
 
 await page.goto(`http://127.0.0.1:${PORT}/demos/promweek/index.html`);
 
-// Wait for buttons to appear
 try {
-  await page.waitForSelector(".action-btn:not([disabled])", { timeout: 10000 });
+  await page.waitForSelector(".target-btn", { timeout: 10000 });
+  await page.waitForSelector(".intent-btn", { timeout: 5000 });
 } catch {
-  console.error("FAIL: action buttons never appeared — game did not load");
+  console.error("FAIL: target/intent buttons never appeared — game did not load");
   const status = await page.locator("#status").textContent().catch(() => "");
   if (status) console.error("  status:", status);
   await browser.close();
   server.close();
   process.exit(1);
 }
-console.log("Game loaded. Action buttons visible.\n");
+console.log("Game loaded.\n");
 
-// Play turns
-const FALLBACKS = ["small-talk", "ask-opinion", "compliment", "flirt", "debate", "confide", "invite-out"];
-const actions = requestedActions.length ? requestedActions : FALLBACKS.slice(0, 5);
+const turns = requestedActions.length
+  ? requestedActions.map(parseTurn)
+  : Array.from({ length: 6 }, (_, i) => ({
+      target: TARGETS[i % TARGETS.length],
+      intent: INTENTS[i % INTENTS.length],
+    }));
 
-for (let i = 0; i < actions.length; i++) {
-  const actionName = actions[i];
+for (let i = 0; i < turns.length; i++) {
+  const { target, intent } = turns[i];
 
-  // Find the button
-  const btn = page.locator(`.action-btn:not(.locked)`).filter({ hasText: new RegExp(actionName.replace(/-/g, "."), "i") }).first();
-  const btnVisible = await btn.isVisible().catch(() => false);
+  const targetBtn = page.locator(".target-btn", { hasText: new RegExp(target, "i") }).first();
+  const intentBtn = page.locator(`.intent-btn.intent-${intent}`).first();
 
-  let actualAction = actionName;
-  let clickTarget = btn;
-
-  if (!btnVisible) {
-    // Fallback: click first available button
-    const first = page.locator(".action-btn:not(.locked):not([disabled])").first();
-    const label = await first.locator(".action-label").textContent().catch(() => "?");
-    actualAction = `(fallback: ${label.trim()})`;
-    clickTarget = first;
+  if (!(await targetBtn.isVisible().catch(() => false))) {
+    console.error(`  ✗ Target "${target}" not found`);
+    break;
   }
+  if (!(await intentBtn.isVisible().catch(() => false))) {
+    console.error(`  ✗ Intent "${intent}" not found`);
+    break;
+  }
+
+  await targetBtn.click();
+  await intentBtn.click();
 
   const prevCount = await page.locator(".log-entry").count();
 
-  console.log(`Turn ${i + 1}: clicking "${actualAction}"...`);
-  await clickTarget.click();
+  console.log(`Turn ${i + 1}: ${target} / ${intent}`);
+  await page.locator("#commit-btn").click();
 
   const result = await waitForTurnComplete(page, prevCount);
 
   if (!result) {
-    console.error(`  ✗ TIMEOUT — game hung after ${TURN_TIMEOUT_MS}ms, no log entry appeared`);
-    // Check if buttons are disabled (busy=true means game is stuck)
-    const buttonsDisabled = await page.locator(".action-btn").first().isDisabled().catch(() => null);
-    console.error(`  buttons disabled (busy=true): ${buttonsDisabled}`);
+    console.error(`  ✗ TIMEOUT — no log entry after ${TURN_TIMEOUT_MS}ms`);
     const statusText = await page.locator("#status").textContent().catch(() => "");
-    if (statusText) console.error(`  status bar: "${statusText}"`);
+    if (statusText) console.error(`  status: "${statusText}"`);
     break;
   }
-
   if (result.error) {
     const statusText = await page.locator("#status").textContent().catch(() => "");
     console.error(`  ✗ ERROR — status: "${statusText}"`);
@@ -166,15 +166,11 @@ for (let i = 0; i < actions.length; i++) {
   }
 
   const entry = await getLastLogEntry(page);
-  console.log(`  player:  ${entry.player}`);
-  if (entry.outcome) console.log(`  outcome: ${entry.outcome}`);
-  if (entry.jordan && entry.jordan !== "(missing)") {
-    console.log(`  jordan:  ${entry.jordan}`);
-  } else {
-    console.error(`  jordan:  (MISSING — no .log-jordan element)`);
-  }
+  console.log(`  player:   ${entry.player?.trim()}`);
+  if (entry.exchange) console.log(`  exchange: ${entry.exchange.trim()}`);
+  if (entry.response) console.log(`  response: ${entry.response.trim()}`);
+  for (const t of entry.triggers ?? []) console.log(`  trigger:  ${t}`);
 
-  // Check if game ended
   const outcomeVisible = await page.locator("#outcome").isVisible().catch(() => false);
   if (outcomeVisible) {
     const outcomeText = await page.locator(".outcome-title").textContent().catch(() => "");
