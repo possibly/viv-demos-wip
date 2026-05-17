@@ -205,6 +205,28 @@ export const ZONE_DISCOVERABLES = Object.fromEntries(
   ])
 );
 
+// Hostile zones where chests can spawn. Kept separate so CHEST_CONFIGS can reference it.
+export const HOSTILE_ZONES = ["briar_edge", "stonewick", "stillwater"];
+
+// Level-range → item power level range (unified mapping used by chests and future systems).
+// level 1-5 bracket maps to item power levels 2-3 (above starter gear, below endgame).
+export const LEVEL_RANGE_POWER = [
+  { minLevel: 1, maxLevel: 5, minPowerLevel: 2, maxPowerLevel: 3 },
+];
+
+export const CHEST_CONFIGS = [
+  {
+    name: "Worn Wooden Chest",
+    minLevel: 1, maxLevel: 5,
+    minPowerLevel: 2, maxPowerLevel: 3,
+    minItems: 1, maxItems: 2,
+    discoveryRate: 0.75,
+    spawnChance: 0.25,
+    cooldownTicks: 100,
+    spawnZones: HOSTILE_ZONES,
+  },
+];
+
 export const WEAK_LOOT_ITEMS = [
   { name: "Tattered Cloth Hood",     powerLevel: 1, slot: "head" },
   { name: "Worn Leather Gloves",     powerLevel: 1, slot: "hands" },
@@ -240,6 +262,42 @@ function generateLoot(rng, enemy) {
   if (rng() < 0.4) result.copper = Math.floor(rng() * 3) + 1;
   if (rng() < 0.3) result.item = pickRandom(rng, WEAK_LOOT_ITEMS);
   return result;
+}
+
+function spawnChest(config, EntityType, rng, state) {
+  const zoneId = pickRandom(rng, config.spawnZones);
+  const itemCount = Math.floor(rng() * (config.maxItems - config.minItems + 1)) + config.minItems;
+
+  const lootItemIds = [];
+  for (let i = 0; i < itemCount; i++) {
+    const powerLevel = Math.floor(rng() * (config.maxPowerLevel - config.minPowerLevel + 1)) + config.minPowerLevel;
+    const candidates = WEAK_LOOT_ITEMS.filter(it => it.powerLevel === powerLevel);
+    const template = pickRandom(rng, candidates.length > 0 ? candidates : WEAK_LOOT_ITEMS);
+    const itemId = makeUUID(rng);
+    state.entities[itemId] = {
+      entityType: EntityType.Item,
+      id: itemId,
+      name: template.name,
+      powerLevel: template.powerLevel,
+      slot: template.slot,
+      location: zoneId,
+    };
+    state.items.push(itemId);
+    lootItemIds.push(itemId);
+  }
+
+  const chestId = makeUUID(rng);
+  state.entities[chestId] = {
+    entityType: EntityType.Item,
+    id: chestId,
+    name: config.name,
+    location: zoneId,
+    isChest: true,
+    lootItems: lootItemIds,
+  };
+  state.items.push(chestId);
+  state.chestState.activeChestId = chestId;
+  return { chestId, zoneId };
 }
 
 export const EQUIPMENT_SLOTS = [
@@ -363,12 +421,15 @@ function buildInitialState(EntityType) {
     memories: {},
   };
   entities[RANGER_VOSS.id] = rangerVossEntity;
+  const worldEntity = { entityType: EntityType.Character, id: "world", name: "The World", memories: {} };
+  entities["world"] = worldEntity;
   return {
     timestamp: 0, entities,
-    characters: [character.id, QUEST_GIVER.id, RANGER_VOSS.id], locations,
+    characters: [character.id, QUEST_GIVER.id, RANGER_VOSS.id, "world"], locations,
     items: [], actions: [],
     vivInternalState: null,
     zoneEnemyStacks: {},
+    chestState: { activeChestId: null, cooldownUntilTick: 0 },
   };
 }
 
@@ -436,8 +497,22 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
   const ticks = [];
   const initialChar = structuredClone(state.entities["adventurer"]);
   const xpCap = LEVEL_XP_MIN[LEVEL_CAP - 1];
+  const chestConfig = CHEST_CONFIGS[0];
 
   for (let t = 0; t < tickCount; t++) {
+    // Chest spawn check: 25% chance per tick when no chest is active and cooldown has passed.
+    if (!state.chestState.activeChestId && t >= state.chestState.cooldownUntilTick) {
+      if (rng() < chestConfig.spawnChance) {
+        const { chestId, zoneId } = spawnChest(chestConfig, EntityType, rng, state);
+        await attemptAction({
+          actionName: "spawn-chest",
+          initiatorID: "world",
+          precastBindings: { world: ["world"], chest: [chestId], zone: [zoneId] },
+          suppressConditions: true,
+        });
+      }
+    }
+
     const adventurer = state.entities["adventurer"];
     const locationID = adventurer.location;
     const zoneName = ZONES.find(z => z.id === locationID)?.name ?? locationID;
@@ -445,6 +520,14 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
     // Undiscovered pool: any Viv character in this zone not yet found
     const undiscoveredPool = (ZONE_DISCOVERABLES[locationID] ?? []).filter(d => !discoveredHere.includes(d.id));
+
+    // If a chest is spawned in this zone and not yet discovered, add it to the pool.
+    if (state.chestState.activeChestId) {
+      const chest = state.entities[state.chestState.activeChestId];
+      if (chest?.location === locationID && !discoveredHere.includes(chest.id)) {
+        undiscoveredPool.push({ id: chest.id, discoveryRate: chestConfig.discoveryRate });
+      }
+    }
 
     // Quest givers already discovered here — used for auto-accept logic below
     const discoveredQuestGiversHere = ALL_QUEST_GIVERS.filter(qg =>
@@ -625,7 +708,8 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
     } else if (selectedActionName === "look-around") {
       if (undiscoveredPool.length > 0) {
-        // When on a quest, bias toward the quest target if it's still undiscovered
+        // When on a quest, bias toward the quest target if it's still undiscovered.
+        // Chests are never the quest target, so they don't interfere with quest bias.
         const questTargetEntry = (adventurer.questActive && !adventurer.questEnemyFound)
           ? undiscoveredPool.find(d => d.id === adventurer.questTargetTemplate)
           : null;
@@ -635,9 +719,55 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
           if (!adventurer.discoveredNPCs[locationID]) adventurer.discoveredNPCs[locationID] = [];
           adventurer.discoveredNPCs[locationID].push(chosen.id);
 
-          // Infer role from entity data: enemy template vs quest giver
+          const chosenEntity = state.entities[chosen.id];
           const enemyTemplate = ENEMY_TEMPLATES[chosen.id];
-          if (enemyTemplate) {
+
+          if (chosenEntity?.isChest) {
+            // Chest discovered — fire loot-chest + equip-item (urgent) on this same tick.
+            const chest = chosenEntity;
+            events.push({ text: `${adventurer.name} discovers a ${chest.name} in ${zoneName}!`, type: "scouting" });
+
+            for (const itemId of chest.lootItems) {
+              const item = state.entities[itemId];
+              adventurer.pendingLootId = itemId;
+              adventurer.shouldEquipLoot = item.powerLevel > (adventurer.equipment[item.slot]?.powerLevel ?? 0);
+              adventurer.pendingEquipSlot = item.slot;
+
+              const lootChestBefore = new Set(state.actions);
+              await attemptAction({
+                actionName: "loot-chest",
+                initiatorID: "adventurer",
+                precastBindings: { adventurer: ["adventurer"], item: [itemId], chest: [chest.id] },
+                suppressConditions: true,
+              });
+              state.actions.filter(id => !lootChestBefore.has(id)).forEach(id => {
+                const a = state.entities[id];
+                events.push({ text: a.report ?? a.gloss ?? "(action)", type: "loot" });
+              });
+
+              // Drain urgent: equip-item fires if loot-chest queued it (item is an upgrade).
+              while (true) {
+                const urgentBefore = new Set(state.actions);
+                await selectAction({ initiatorID: "adventurer", urgentOnly: true });
+                const urgentNew = state.actions.filter(id => !urgentBefore.has(id));
+                if (urgentNew.length === 0) break;
+                urgentNew.forEach(id => {
+                  const a = state.entities[id];
+                  events.push({ text: a.report ?? a.gloss ?? "(action)", type: "loot" });
+                  if (a.name === "equip-item") {
+                    const slot = item.slot;
+                    adventurer.equipment[slot] = { name: item.name, powerLevel: item.powerLevel };
+                    adventurer.inventory = [...(adventurer.inventory ?? []), item];
+                  }
+                });
+              }
+            }
+
+            // Chest is fully looted; start cooldown before the next one can spawn.
+            state.chestState.activeChestId = null;
+            state.chestState.cooldownUntilTick = t + chestConfig.cooldownTicks;
+
+          } else if (enemyTemplate) {
             const factionId = enemyTemplate.faction;
             const newFaction = !(factionId in adventurer.factionRelationships);
             if (newFaction) adventurer.factionRelationships[factionId] = initialFactionRep(factionId);

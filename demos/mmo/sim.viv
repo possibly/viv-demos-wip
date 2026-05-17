@@ -117,6 +117,16 @@ reserved action level-up:
     effects:
         @adventurer.level = @adventurer.pendingLevel
 
+reserved action spawn-chest:
+    gloss: "@chest appears in @zone"
+    roles:
+        @world:
+            as: initiator
+        @chest:
+            as: item
+        @zone:
+            as: location
+
 reserved action loot-item:
     gloss: "@adventurer loots @item from @enemy"
     roles:
@@ -126,6 +136,26 @@ reserved action loot-item:
             as: item
         @enemy:
             as: recipient
+    effects:
+        @adventurer.pendingLootId = false
+    reactions:
+        if @adventurer.shouldEquipLoot:
+            queue action equip-item:
+                with:
+                    @adventurer: @adventurer
+                    @item: @item
+                urgent: true
+        end
+
+reserved action loot-chest:
+    gloss: "@adventurer loots @item from @chest"
+    roles:
+        @adventurer:
+            as: initiator
+        @item:
+            as: item
+        @chest:
+            as: item
     effects:
         @adventurer.pendingLootId = false
     reactions:
