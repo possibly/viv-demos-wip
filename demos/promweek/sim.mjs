@@ -180,6 +180,40 @@ export function checkOutcome(rel) {
   return null;
 }
 
+// ── Headless simulation (Node runner convention) ─────────────────────────────
+
+export async function runSim(runtime, bundle, seedStr, tickCount) {
+  const game = initGame(runtime, bundle, "pursuit");
+  const rng = mulberry32(hashSeed(seedStr));
+
+  await game.start();
+
+  const ticks = [];
+  for (let i = 0; i < tickCount; i++) {
+    const available = game.getAvailableActions().filter(a => a.available);
+    if (available.length === 0) break;
+
+    const action = available[Math.floor(rng() * available.length)];
+    const result = await game.takeTurn(action.name);
+    const events = [];
+    if (result.intent)        events.push({ text: result.intent.gloss,        type: "intent" });
+    if (result.outcome)       events.push({ text: result.outcome.gloss,       type: "outcome" });
+    if (result.jordanReaction) events.push({ text: result.jordanReaction.gloss, type: "reaction" });
+
+    ticks.push({ index: i, timestamp: i + 1, events, relationship: result.relationship, gameOutcome: result.gameOutcome });
+    if (result.gameOutcome) break;
+  }
+
+  return { ticks };
+}
+
+export function summarize(tick) {
+  const r = tick.relationship;
+  const end = tick.gameOutcome ? ` → ${tick.gameOutcome}` : "";
+  return `friendship:${r.friendship} romance:${r.romance} trust:${r.trust} tension:${r.tension}${end}`;
+}
+
+
 // ── The Viv-backed game ──────────────────────────────────────────────────────
 
 export function initGame({ initializeVivRuntime, attemptAction, selectAction, EntityType }, bundle, sceneKey = "pursuit") {
