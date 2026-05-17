@@ -110,6 +110,20 @@ export const RANGER_VOSS = {
 
 export const ALL_QUEST_GIVERS = [QUEST_GIVER, RANGER_VOSS];
 
+export const VENDOR_ARNAULT = {
+  id: "vendorArnault",
+  name: "Arnault the Trader",
+  location: "hearthfield",
+  discoveryRate: 1.0,
+  items: [
+    { name: "Leather Gloves",  powerLevel: 1, slot: "hands", cost: 15 },
+    { name: "Leather Bracers", powerLevel: 1, slot: "wrist", cost: 15 },
+    { name: "Leather Belt",    powerLevel: 1, slot: "waist", cost: 15 },
+  ],
+};
+
+export const ALL_VENDORS = [VENDOR_ARNAULT];
+
 export const QUEST_ITEMS = {
   captains_insignia: {
     id: "captains_insignia",
@@ -193,14 +207,15 @@ export const ZONE_ENEMIES = {
 };
 
 // Unified discoverable NPC pool per zone. Contains only non-player characters (enemies, quest givers,
-// etc.) — player characters are never discoverable. Each entry is { id, discoveryRate }; role is
-// inferred from entity data after discovery (ENEMY_TEMPLATES membership, ALL_QUEST_GIVERS, etc.).
+// vendors, etc.) — player characters are never discoverable. Each entry is { id, discoveryRate }; role
+// is inferred from entity data after discovery (ENEMY_TEMPLATES, ALL_QUEST_GIVERS, ALL_VENDORS, etc.).
 export const ZONE_DISCOVERABLES = Object.fromEntries(
   ZONES.map(z => [
     z.id,
     [
       ...(ZONE_ENEMIES[z.id] ?? []).map(id => ({ id, discoveryRate: ENEMY_TEMPLATES[id].discoveryRate })),
       ...ALL_QUEST_GIVERS.filter(qg => qg.location === z.id).map(qg => ({ id: qg.id, discoveryRate: qg.discoveryRate })),
+      ...ALL_VENDORS.filter(v => v.location === z.id).map(v => ({ id: v.id, discoveryRate: v.discoveryRate })),
     ],
   ])
 );
@@ -244,6 +259,10 @@ export const WEAK_LOOT_ITEMS = [
   { name: "Crude Iron Axe",          powerLevel: 3, slot: "mainhand" },
   { name: "Pitted Iron Gauntlets",   powerLevel: 3, slot: "hands" },
 ];
+
+export function itemSellPrice(item) {
+  return (item.powerLevel ?? 1) * 5;
+}
 
 export function copperToString(total) {
   const gold   = Math.floor(total / 10000);
@@ -421,11 +440,20 @@ function buildInitialState(EntityType) {
     memories: {},
   };
   entities[RANGER_VOSS.id] = rangerVossEntity;
+  for (const vendor of ALL_VENDORS) {
+    entities[vendor.id] = {
+      entityType: EntityType.Character,
+      id: vendor.id,
+      name: vendor.name,
+      location: vendor.location,
+      memories: {},
+    };
+  }
   const worldEntity = { entityType: EntityType.Character, id: "world", name: "The World", memories: {} };
   entities["world"] = worldEntity;
   return {
     timestamp: 0, entities,
-    characters: [character.id, QUEST_GIVER.id, RANGER_VOSS.id, "world"], locations,
+    characters: [character.id, QUEST_GIVER.id, RANGER_VOSS.id, ...ALL_VENDORS.map(v => v.id), "world"], locations,
     items: [], actions: [],
     vivInternalState: null,
     zoneEnemyStacks: {},
@@ -534,6 +562,11 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       qg.location === locationID && discoveredHere.includes(qg.id)
     );
 
+    // Vendors already discovered here — used for buy/sell flag computation
+    const discoveredVendorsHere = ALL_VENDORS.filter(v =>
+      v.location === locationID && discoveredHere.includes(v.id)
+    );
+
     // Update quest state flags read by Viv plan conditions
     if (adventurer.questActive) {
       adventurer.questEnemyFound = (adventurer.discoveredNPCs[adventurer.questTargetZone] ?? []).includes(adventurer.questTargetTemplate);
@@ -570,6 +603,22 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     // what's possible at the current location and are read as conditions by Viv actions.
     adventurer.canFight = discoveredHere.some(id => id in ENEMY_TEMPLATES);
     adventurer.canScout = undiscoveredPool.length > 0;
+
+    // Vendor interaction flags: sell when inventory has non-quest items; buy when a vendor here
+    // stocks an item whose power level exceeds the equipped slot and the player can afford it.
+    const sellableItems = (adventurer.inventory ?? []).filter(item => !item.isQuestItem);
+    adventurer.canSellItems = sellableItems.length > 0 && discoveredVendorsHere.length > 0;
+
+    const buyableCandidates = [];
+    for (const vendor of discoveredVendorsHere) {
+      for (const vi of vendor.items) {
+        const currentPower = adventurer.equipment[vi.slot]?.powerLevel ?? 0;
+        if (vi.powerLevel > currentPower && vi.cost <= (adventurer.copper ?? 0)) {
+          buyableCandidates.push({ item: vi, vendor });
+        }
+      }
+    }
+    adventurer.canBuyItem = buyableCandidates.length > 0;
 
     const events = [];
 
@@ -791,8 +840,13 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
             const factionNote = newFaction ? ` ${FACTIONS[factionId]?.name ?? factionId} added to known factions.` : "";
             events.push({ text: `${adventurer.name} spots a level ${enemyTemplate.level} ${enemyTemplate.name} in ${zoneName}.${factionNote}`, type: "scouting" });
           } else {
-            const questGiver = ALL_QUEST_GIVERS.find(qg => qg.id === chosen.id);
-            events.push({ text: `${adventurer.name} meets ${questGiver.name} in ${zoneName}!`, type: "scouting" });
+            const vendor = ALL_VENDORS.find(v => v.id === chosen.id);
+            if (vendor) {
+              events.push({ text: `${adventurer.name} encounters ${vendor.name} in ${zoneName}!`, type: "scouting" });
+            } else {
+              const questGiver = ALL_QUEST_GIVERS.find(qg => qg.id === chosen.id);
+              events.push({ text: `${adventurer.name} meets ${questGiver.name} in ${zoneName}!`, type: "scouting" });
+            }
           }
         } else {
           events.push({ text: `${adventurer.name} searches ${zoneName} but finds nothing unusual.`, type: "scouting" });
@@ -816,6 +870,88 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         const a = state.entities[id];
         events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
       });
+
+    } else if (selectedActionName === "sell-items") {
+      const toSell = (adventurer.inventory ?? []).filter(item => !item.isQuestItem);
+      const sellValue = toSell.reduce((sum, item) => sum + itemSellPrice(item), 0);
+      const soldAt = discoveredVendorsHere[0];
+      newActionIDs.forEach(id => {
+        const a = state.entities[id];
+        events.push({ text: a.report ?? a.gloss ?? "(action)", type: "vendor" });
+      });
+      adventurer.copper = (adventurer.copper ?? 0) + sellValue;
+      adventurer.inventory = (adventurer.inventory ?? []).filter(item => item.isQuestItem);
+      events.push({
+        text: `${adventurer.name} sells ${toSell.length} item(s) to ${soldAt.name} for ${copperToString(sellValue)}.`,
+        type: "vendor",
+      });
+
+    } else if (selectedActionName === "buy-item") {
+      if (buyableCandidates.length > 0) {
+        const { item: boughtItem, vendor: boughtFrom } = pickRandom(rng, buyableCandidates);
+        const boughtItemId = makeUUID(rng);
+        state.entities[boughtItemId] = {
+          entityType: EntityType.Item,
+          id: boughtItemId,
+          name: boughtItem.name,
+          powerLevel: boughtItem.powerLevel,
+          slot: boughtItem.slot,
+          location: locationID,
+        };
+        state.items.push(boughtItemId);
+
+        adventurer.copper = (adventurer.copper ?? 0) - boughtItem.cost;
+        adventurer.inventory = [...(adventurer.inventory ?? []), state.entities[boughtItemId]];
+        adventurer.pendingLootId = boughtItemId;
+        adventurer.shouldEquipLoot = true;
+        adventurer.pendingEquipSlot = boughtItem.slot;
+
+        newActionIDs.forEach(id => {
+          const a = state.entities[id];
+          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "vendor" });
+        });
+        events.push({
+          text: `${adventurer.name} buys ${boughtItem.name} from ${boughtFrom.name} for ${copperToString(boughtItem.cost)}.`,
+          type: "vendor",
+        });
+
+        // Fire purchase-item so its reaction urgent-queues equip-item
+        const purchaseBefore = new Set(state.actions);
+        await attemptAction({
+          actionName: "purchase-item",
+          initiatorID: "adventurer",
+          precastBindings: { adventurer: ["adventurer"], item: [boughtItemId], vendor: [boughtFrom.id] },
+          suppressConditions: true,
+        });
+        state.actions.filter(id => !purchaseBefore.has(id)).forEach(id => {
+          const a = state.entities[id];
+          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "vendor" });
+        });
+
+        // Drain urgent queue: equip-item fires here
+        while (true) {
+          const urgentBefore = new Set(state.actions);
+          await selectAction({ initiatorID: "adventurer", urgentOnly: true });
+          const urgentNew = state.actions.filter(id => !urgentBefore.has(id));
+          if (urgentNew.length === 0) break;
+          urgentNew.forEach(id => {
+            const a = state.entities[id];
+            events.push({ text: a.report ?? a.gloss ?? "(action)", type: "vendor" });
+            if (a.name === "equip-item") {
+              const slot = adventurer.pendingEquipSlot;
+              const boughtEntity = state.entities[boughtItemId];
+              if (slot && boughtEntity) {
+                const displaced = adventurer.equipment[slot];
+                if (displaced) {
+                  adventurer.inventory = [...(adventurer.inventory ?? []), { ...displaced, slot }];
+                }
+                adventurer.equipment[slot] = { name: boughtEntity.name, powerLevel: boughtEntity.powerLevel };
+                adventurer.inventory = (adventurer.inventory ?? []).filter(i => i !== boughtEntity && i.id !== boughtItemId);
+              }
+            }
+          });
+        }
+      }
 
     } else if (selectedActionName === "travel-to-quest-zone" || selectedActionName === "return-to-quest-giver") {
       // Viv effect already updated adventurer.location; just surface the event
