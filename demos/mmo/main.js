@@ -179,7 +179,7 @@ function renderModal(char) {
     </div>`;
 }
 
-function renderZonemap(currentLocationID, discoveredCharacters) {
+function renderZonemap(currentLocationID, discoveredNPCs) {
   zonemapEl.innerHTML = "";
   for (const z of ZONES) {
     const el = document.createElement("div");
@@ -188,7 +188,7 @@ function renderZonemap(currentLocationID, discoveredCharacters) {
       (z.id === currentLocationID ? " active" : "") +
       (isDanger ? " danger" : "");
 
-    const knownHere = discoveredCharacters?.[z.id] ?? [];
+    const knownHere = discoveredNPCs?.[z.id] ?? [];
 
     const discovered = knownHere
       .map(id => ENEMY_TEMPLATES[id])
@@ -218,7 +218,7 @@ function render() {
   btnNext.disabled = currentTick === simData.ticks.length - 1;
 
   renderCharCard(tick.character);
-  renderZonemap(tick.character.location, tick.character.discoveredCharacters);
+  renderZonemap(tick.character.location, tick.character.discoveredNPCs);
   if (!charModalEl.hidden) renderModal(tick.character);
 
   eventsEl.innerHTML = "";

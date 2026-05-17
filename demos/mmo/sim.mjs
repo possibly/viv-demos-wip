@@ -192,9 +192,9 @@ export const ZONE_ENEMIES = {
   stillwater: ["grimspawn_warrior", "grimspawn_enforcer", "grimspawn_captain", "grimspawn_warlord"],
 };
 
-// Unified discoverable pool per zone: all discoverable Viv characters (enemies, quest givers, etc.)
-// share the same queue. Each entry is { id, discoveryRate }; role is inferred from entity data
-// after discovery (ENEMY_TEMPLATES membership, ALL_QUEST_GIVERS membership, etc.).
+// Unified discoverable NPC pool per zone. Contains only non-player characters (enemies, quest givers,
+// etc.) — player characters are never discoverable. Each entry is { id, discoveryRate }; role is
+// inferred from entity data after discovery (ENEMY_TEMPLATES membership, ALL_QUEST_GIVERS, etc.).
 export const ZONE_DISCOVERABLES = Object.fromEntries(
   ZONES.map(z => [
     z.id,
@@ -328,7 +328,7 @@ function generateCharacter(EntityType, rng) {
     inventory: [],
     equipment: getStarterEquipment(classKey, raceKey),
     factionRelationships: {},
-    discoveredCharacters: {},
+    discoveredNPCs: {},
     completedQuests: [],
     questActive: false,
     questEnemyFound: false,
@@ -441,7 +441,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     const adventurer = state.entities["adventurer"];
     const locationID = adventurer.location;
     const zoneName = ZONES.find(z => z.id === locationID)?.name ?? locationID;
-    const discoveredHere = adventurer.discoveredCharacters[locationID] ?? [];
+    const discoveredHere = adventurer.discoveredNPCs[locationID] ?? [];
 
     // Undiscovered pool: any Viv character in this zone not yet found
     const undiscoveredPool = (ZONE_DISCOVERABLES[locationID] ?? []).filter(d => !discoveredHere.includes(d.id));
@@ -453,7 +453,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
     // Update quest state flags read by Viv plan conditions
     if (adventurer.questActive) {
-      adventurer.questEnemyFound = (adventurer.discoveredCharacters[adventurer.questTargetZone] ?? []).includes(adventurer.questTargetTemplate);
+      adventurer.questEnemyFound = (adventurer.discoveredNPCs[adventurer.questTargetZone] ?? []).includes(adventurer.questTargetTemplate);
       const killsDone = (adventurer.questKillsDone ?? 0) >= (adventurer.questKillsNeeded ?? 1);
       const activeQuest = QUESTS.find(q => q.id === adventurer.questId);
       const itemDone = !activeQuest?.questItem || adventurer.questItemCollected;
@@ -508,7 +508,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         adventurer.questKillsDone = 0;
         adventurer.questItemCollected = false;
         adventurer.questXpReward = questXpReward(quest.level);
-        adventurer.questEnemyFound = (adventurer.discoveredCharacters[quest.targetZone] ?? []).includes(quest.targetTemplate);
+        adventurer.questEnemyFound = (adventurer.discoveredNPCs[quest.targetZone] ?? []).includes(quest.targetTemplate);
         adventurer.questHuntDone = false;
         adventurer.questReadyToComplete = false;
         newAcceptIDs.forEach(id => {
@@ -632,8 +632,8 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         const chosen = questTargetEntry ?? pickRandom(rng, undiscoveredPool);
 
         if (rng() < chosen.discoveryRate) {
-          if (!adventurer.discoveredCharacters[locationID]) adventurer.discoveredCharacters[locationID] = [];
-          adventurer.discoveredCharacters[locationID].push(chosen.id);
+          if (!adventurer.discoveredNPCs[locationID]) adventurer.discoveredNPCs[locationID] = [];
+          adventurer.discoveredNPCs[locationID].push(chosen.id);
 
           // Infer role from entity data: enemy template vs quest giver
           const enemyTemplate = ENEMY_TEMPLATES[chosen.id];
