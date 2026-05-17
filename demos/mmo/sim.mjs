@@ -380,10 +380,9 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       }
     }
 
-    const inReturnPhase = adventurer.questActive && adventurer.questHuntDone && !adventurer.questReadyToComplete;
-
-    // Suppress fighting during the return phase; look-around works anywhere there's something new
-    adventurer.canFight = discoveredHere.length > 0 && !inReturnPhase;
+    // Viv's quest-directed selector handles all quest-phase routing; these flags just expose
+    // what's possible at the current location and are read as conditions by Viv actions.
+    adventurer.canFight = discoveredHere.length > 0;
     adventurer.canScout = undiscoveredEnemies.length > 0 || hasUndiscoveredQuestGiver;
 
     const events = [];
@@ -417,114 +416,116 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     // Advance the quest plan (no-op when no plan is queued)
     await tickPlanner();
 
-    // Directed wander back to quest giver during return phase
-    if (inReturnPhase) {
-      const returnBindings = { adventurer: ["adventurer"], destination: [QUEST_GIVER.location] };
-      const returnBefore = new Set(state.actions);
-      await attemptAction({ actionName: "wander", initiatorID: "adventurer", precastBindings: returnBindings, suppressConditions: true });
-      state.actions.filter(id => !returnBefore.has(id)).forEach(id => {
-        const a = state.entities[id];
-        events.push({ text: a.report ?? a.gloss ?? "(action)", type: "quest" });
-      });
-    } else {
-      // Normal activity selection (also fires complete-quest when queued by plan)
-      const actionsBefore = new Set(state.actions);
-      await selectAction({ initiatorID: "adventurer" });
-      const newActionIDs = state.actions.filter(id => !actionsBefore.has(id));
-      const selectedActionName = newActionIDs.length > 0 ? state.entities[newActionIDs[0]].name : null;
+    // Viv's pick-activity selector drives all routing: quest-directed (in order) → free-roaming
+    const actionsBefore = new Set(state.actions);
+    await selectAction({ initiatorID: "adventurer" });
+    const newActionIDs = state.actions.filter(id => !actionsBefore.has(id));
+    const selectedActionName = newActionIDs.length > 0 ? state.entities[newActionIDs[0]].name : null;
 
-      if (selectedActionName === "fight") {
-        // Bias toward quest target during hunt phase
-        const inHuntPhase = adventurer.questActive && (adventurer.questEnemyFound ?? false) && !(adventurer.questHuntDone ?? false);
-        const questTargetHere = inHuntPhase && locationID === adventurer.questTargetZone && discoveredHere.includes(adventurer.questTargetTemplate);
-        const templateId = questTargetHere ? adventurer.questTargetTemplate : pickRandom(rng, discoveredHere);
+    if (selectedActionName === "fight") {
+      // Bias toward quest target when Viv selects fight during the hunt phase
+      const inHuntPhase = adventurer.questActive && (adventurer.questEnemyFound ?? false) && !(adventurer.questHuntDone ?? false);
+      const questTargetHere = inHuntPhase && locationID === adventurer.questTargetZone && discoveredHere.includes(adventurer.questTargetTemplate);
+      const templateId = questTargetHere ? adventurer.questTargetTemplate : pickRandom(rng, discoveredHere);
 
-        let enemyId = firstAliveEnemyOfTemplate(locationID, templateId);
-        if (!enemyId) enemyId = spawnEnemy(templateId, locationID);
-        const enemy = state.entities[enemyId];
+      let enemyId = firstAliveEnemyOfTemplate(locationID, templateId);
+      if (!enemyId) enemyId = spawnEnemy(templateId, locationID);
+      const enemy = state.entities[enemyId];
 
-        const avgPower = getAvgEquipmentPower(adventurer);
-        const winChance = combatWinChance(adventurer.level, avgPower, enemy.level, enemy.powerLevel);
-        const playerWins = rng() < winChance;
+      const avgPower = getAvgEquipmentPower(adventurer);
+      const winChance = combatWinChance(adventurer.level, avgPower, enemy.level, enemy.powerLevel);
+      const playerWins = rng() < winChance;
 
-        adventurer.pendingXpReward = Math.min(enemy.xpReward, Math.max(0, xpCap - adventurer.xp));
-        adventurer.pendingLevel = Math.min(getLevel(adventurer.xp + adventurer.pendingXpReward), LEVEL_CAP);
+      adventurer.pendingXpReward = Math.min(enemy.xpReward, Math.max(0, xpCap - adventurer.xp));
+      adventurer.pendingLevel = Math.min(getLevel(adventurer.xp + adventurer.pendingXpReward), LEVEL_CAP);
 
-        const combatBindings = { adventurer: ["adventurer"], enemy: [enemyId] };
+      const combatBindings = { adventurer: ["adventurer"], enemy: [enemyId] };
 
-        if (playerWins) {
-          const killBefore = new Set(state.actions);
-          await attemptAction({ actionName: "kill", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
-          state.actions.filter(id => !killBefore.has(id)).forEach(id => {
-            const a = state.entities[id];
-            events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
-          });
-
-          // Track quest kill progress
-          if (adventurer.questActive && enemy.templateId === templateId && templateId === adventurer.questTargetTemplate) {
-            adventurer.questKillsDone = (adventurer.questKillsDone ?? 0) + 1;
-          }
-
-          const levelUpBefore = new Set(state.actions);
-          await selectAction({ initiatorID: "adventurer", urgentOnly: true });
-          state.actions.filter(id => !levelUpBefore.has(id)).forEach(id => {
-            const a = state.entities[id];
-            events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
-          });
-        } else {
-          const retreatBefore = new Set(state.actions);
-          await attemptAction({ actionName: "retreat", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
-          state.actions.filter(id => !retreatBefore.has(id)).forEach(id => {
-            const a = state.entities[id];
-            events.push({ text: a.report ?? a.gloss ?? "(action)", type: "retreat" });
-          });
-        }
-
-      } else if (selectedActionName === "look-around") {
-        if (hasUndiscoveredQuestGiver) {
-          // Discover quest giver (always 100%)
-          if (!adventurer.discoveredQuestGivers[locationID]) adventurer.discoveredQuestGivers[locationID] = [];
-          adventurer.discoveredQuestGivers[locationID].push(QUEST_GIVER.id);
-          events.push({ text: `${adventurer.name} meets ${QUEST_GIVER.name} in ${zoneName}!`, type: "scouting" });
-        } else if (undiscoveredEnemies.length > 0) {
-          const foundId = pickRandom(rng, undiscoveredEnemies);
-          const enemy = ENEMY_TEMPLATES[foundId];
-          if (rng() < enemy.discoveryRate) {
-            if (!adventurer.discoveredEnemies[locationID]) adventurer.discoveredEnemies[locationID] = [];
-            adventurer.discoveredEnemies[locationID].push(foundId);
-            const factionId = enemy.faction;
-            const newFaction = !(factionId in adventurer.factionRelationships);
-            if (newFaction) adventurer.factionRelationships[factionId] = initialFactionRep(factionId);
-            const factionNote = newFaction ? ` ${FACTIONS[factionId]?.name ?? factionId} added to known factions.` : "";
-            events.push({ text: `${adventurer.name} spots a level ${enemy.level} ${enemy.name} in ${zoneName}.${factionNote}`, type: "scouting" });
-          } else {
-            events.push({ text: `${adventurer.name} searches ${zoneName} but finds nothing unusual.`, type: "scouting" });
-          }
-        }
-
-      } else if (selectedActionName === "complete-quest") {
-        newActionIDs.forEach(id => {
+      if (playerWins) {
+        const killBefore = new Set(state.actions);
+        await attemptAction({ actionName: "kill", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
+        state.actions.filter(id => !killBefore.has(id)).forEach(id => {
           const a = state.entities[id];
-          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "quest" });
+          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
         });
-        const quest = QUESTS.find(q => q.id === adventurer.questId);
-        events.push({ text: `${adventurer.name} receives ${adventurer.questXpReward} XP from ${QUEST_GIVER.name}!`, type: "quest" });
-        adventurer.completedQuests = [...(adventurer.completedQuests ?? []), adventurer.questId];
 
-        // Fire level-up if queued by complete-quest's reaction
+        // Track quest kill progress
+        if (adventurer.questActive && enemy.templateId === templateId && templateId === adventurer.questTargetTemplate) {
+          adventurer.questKillsDone = (adventurer.questKillsDone ?? 0) + 1;
+        }
+
         const levelUpBefore = new Set(state.actions);
         await selectAction({ initiatorID: "adventurer", urgentOnly: true });
         state.actions.filter(id => !levelUpBefore.has(id)).forEach(id => {
           const a = state.entities[id];
           events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
         });
-
       } else {
-        newActionIDs.forEach(id => {
+        const retreatBefore = new Set(state.actions);
+        await attemptAction({ actionName: "retreat", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
+        state.actions.filter(id => !retreatBefore.has(id)).forEach(id => {
           const a = state.entities[id];
-          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "" });
+          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "retreat" });
         });
       }
+
+    } else if (selectedActionName === "look-around") {
+      if (hasUndiscoveredQuestGiver) {
+        // Discover quest giver (always 100%)
+        if (!adventurer.discoveredQuestGivers[locationID]) adventurer.discoveredQuestGivers[locationID] = [];
+        adventurer.discoveredQuestGivers[locationID].push(QUEST_GIVER.id);
+        events.push({ text: `${adventurer.name} meets ${QUEST_GIVER.name} in ${zoneName}!`, type: "scouting" });
+      } else if (undiscoveredEnemies.length > 0) {
+        // Prioritize the quest target so the adventurer finds it before other enemies in the zone
+        const questTargetUndiscovered = adventurer.questActive &&
+          !adventurer.questEnemyFound &&
+          undiscoveredEnemies.includes(adventurer.questTargetTemplate);
+        const foundId = questTargetUndiscovered
+          ? adventurer.questTargetTemplate
+          : pickRandom(rng, undiscoveredEnemies);
+        const enemy = ENEMY_TEMPLATES[foundId];
+        if (rng() < enemy.discoveryRate) {
+          if (!adventurer.discoveredEnemies[locationID]) adventurer.discoveredEnemies[locationID] = [];
+          adventurer.discoveredEnemies[locationID].push(foundId);
+          const factionId = enemy.faction;
+          const newFaction = !(factionId in adventurer.factionRelationships);
+          if (newFaction) adventurer.factionRelationships[factionId] = initialFactionRep(factionId);
+          const factionNote = newFaction ? ` ${FACTIONS[factionId]?.name ?? factionId} added to known factions.` : "";
+          events.push({ text: `${adventurer.name} spots a level ${enemy.level} ${enemy.name} in ${zoneName}.${factionNote}`, type: "scouting" });
+        } else {
+          events.push({ text: `${adventurer.name} searches ${zoneName} but finds nothing unusual.`, type: "scouting" });
+        }
+      }
+
+    } else if (selectedActionName === "complete-quest") {
+      newActionIDs.forEach(id => {
+        const a = state.entities[id];
+        events.push({ text: a.report ?? a.gloss ?? "(action)", type: "quest" });
+      });
+      const quest = QUESTS.find(q => q.id === adventurer.questId);
+      events.push({ text: `${adventurer.name} receives ${adventurer.questXpReward} XP from ${QUEST_GIVER.name}!`, type: "quest" });
+      adventurer.completedQuests = [...(adventurer.completedQuests ?? []), adventurer.questId];
+
+      // Fire level-up if queued by complete-quest's reaction
+      const levelUpBefore = new Set(state.actions);
+      await selectAction({ initiatorID: "adventurer", urgentOnly: true });
+      state.actions.filter(id => !levelUpBefore.has(id)).forEach(id => {
+        const a = state.entities[id];
+        events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
+      });
+
+    } else if (selectedActionName === "travel-to-quest-zone" || selectedActionName === "return-to-quest-giver") {
+      // Viv effect already updated adventurer.location; just surface the event
+      newActionIDs.forEach(id => {
+        const a = state.entities[id];
+        events.push({ text: a.report ?? a.gloss ?? "(action)", type: "quest" });
+      });
+
+    } else {
+      newActionIDs.forEach(id => {
+        const a = state.entities[id];
+        events.push({ text: a.report ?? a.gloss ?? "(action)", type: "" });
+      });
     }
 
     state.timestamp += 10;
