@@ -117,6 +117,16 @@ reserved action level-up:
     effects:
         @adventurer.level = @adventurer.pendingLevel
 
+reserved action spawn-chest:
+    gloss: "@chest appears in @zone"
+    roles:
+        @adventurer:
+            as: initiator
+        @chest:
+            as: item
+        @zone:
+            as: location
+
 reserved action loot-item:
     gloss: "@adventurer loots @item from @enemy"
     roles:

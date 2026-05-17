@@ -297,6 +297,7 @@ function spawnChest(config, EntityType, rng, state) {
   };
   state.items.push(chestId);
   state.chestState.activeChestId = chestId;
+  return { chestId, zoneId };
 }
 
 export const EQUIPMENT_SLOTS = [
@@ -500,7 +501,13 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     // Chest spawn check: 25% chance per tick when no chest is active and cooldown has passed.
     if (!state.chestState.activeChestId && t >= state.chestState.cooldownUntilTick) {
       if (rng() < chestConfig.spawnChance) {
-        spawnChest(chestConfig, EntityType, rng, state);
+        const { chestId, zoneId } = spawnChest(chestConfig, EntityType, rng, state);
+        await attemptAction({
+          actionName: "spawn-chest",
+          initiatorID: "adventurer",
+          precastBindings: { adventurer: ["adventurer"], chest: [chestId], zone: [zoneId] },
+          suppressConditions: true,
+        });
       }
     }
 
