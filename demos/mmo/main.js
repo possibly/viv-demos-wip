@@ -1,5 +1,5 @@
 import { initializeVivRuntime, selectAction, attemptAction, tickPlanner, EntityType } from "../../shared/viv-runtime.js";
-import { runSim, CLASS_DATA, ZONES, ENEMY_TEMPLATES, ZONE_ENEMIES, LEVEL_XP_MIN, LEVEL_CAP, FACTIONS, RACE_LABELS, EQUIPMENT_SLOTS, SLOT_LABELS, QUEST_GIVER, QUESTS, copperToString } from "./sim.mjs";
+import { runSim, CLASS_DATA, ZONES, ENEMY_TEMPLATES, ZONE_ENEMIES, LEVEL_XP_MIN, LEVEL_CAP, FACTIONS, RACE_LABELS, EQUIPMENT_SLOTS, SLOT_LABELS, QUEST_GIVER, ALL_QUEST_GIVERS, QUESTS, QUEST_ITEMS, copperToString } from "./sim.mjs";
 
 const runtime = { initializeVivRuntime, selectAction, attemptAction, tickPlanner, EntityType };
 let cachedBundle = null;
@@ -36,10 +36,12 @@ function questStatusText(char) {
   if (!quest) return null;
   const done = char.questKillsDone ?? 0;
   const needed = char.questKillsNeeded ?? quest.targetCount;
+  const questGiver = ALL_QUEST_GIVERS.find(qg => qg.id === quest.questGiverId) ?? QUEST_GIVER;
   let phase;
   if (!char.questEnemyFound) phase = "Scouting…";
   else if (done < needed) phase = `Slain: ${done} / ${needed}`;
-  else if (!char.questReadyToComplete) phase = `Return to ${QUEST_GIVER.name}`;
+  else if (quest.questItem && !char.questItemCollected) phase = `Collect: ${QUEST_ITEMS[quest.questItem]?.name ?? "quest item"}`;
+  else if (!char.questReadyToComplete) phase = `Return to ${questGiver.name}`;
   else phase = "Ready to turn in!";
   return { name: quest.name, phase };
 }
@@ -195,9 +197,11 @@ function renderZonemap(currentLocationID, discoveredEnemies, discoveredQuestGive
       ? `<div class="zone-enemies">${discovered.map(e => `<span class="zone-enemy">${e.name} · Lv. ${e.level}</span>`).join("")}</div>`
       : "";
 
-    const giverKnown = (discoveredQuestGivers?.[z.id] ?? []).includes(QUEST_GIVER.id);
-    const giverHTML = giverKnown
-      ? `<div class="zone-quest-giver"><span class="zone-npc">&#x1F4DC; ${QUEST_GIVER.name}</span></div>`
+    const knownGivers = ALL_QUEST_GIVERS.filter(qg =>
+      qg.location === z.id && (discoveredQuestGivers?.[z.id] ?? []).includes(qg.id)
+    );
+    const giverHTML = knownGivers.length > 0
+      ? `<div class="zone-quest-giver">${knownGivers.map(qg => `<span class="zone-npc">&#x1F4DC; ${qg.name}</span>`).join("")}</div>`
       : "";
 
     el.innerHTML = `<span class="zone-name">${z.name}</span><span class="zone-desc">${z.desc}</span>${enemyHTML}${giverHTML}`;
