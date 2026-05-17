@@ -137,6 +137,26 @@ reserved action loot-item:
                 urgent: true
         end
 
+reserved action loot-chest:
+    gloss: "@adventurer loots @item from @chest"
+    roles:
+        @adventurer:
+            as: initiator
+        @item:
+            as: item
+        @chest:
+            as: item
+    effects:
+        @adventurer.pendingLootId = false
+    reactions:
+        if @adventurer.shouldEquipLoot:
+            queue action equip-item:
+                with:
+                    @adventurer: @adventurer
+                    @item: @item
+                urgent: true
+        end
+
 reserved action equip-item:
     gloss: "@adventurer equips @item"
     roles:
