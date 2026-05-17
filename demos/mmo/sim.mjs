@@ -421,9 +421,11 @@ function buildInitialState(EntityType) {
     memories: {},
   };
   entities[RANGER_VOSS.id] = rangerVossEntity;
+  const worldEntity = { entityType: EntityType.Character, id: "world", name: "The World", memories: {} };
+  entities["world"] = worldEntity;
   return {
     timestamp: 0, entities,
-    characters: [character.id, QUEST_GIVER.id, RANGER_VOSS.id], locations,
+    characters: [character.id, QUEST_GIVER.id, RANGER_VOSS.id, "world"], locations,
     items: [], actions: [],
     vivInternalState: null,
     zoneEnemyStacks: {},
@@ -504,8 +506,8 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         const { chestId, zoneId } = spawnChest(chestConfig, EntityType, rng, state);
         await attemptAction({
           actionName: "spawn-chest",
-          initiatorID: "adventurer",
-          precastBindings: { adventurer: ["adventurer"], chest: [chestId], zone: [zoneId] },
+          initiatorID: "world",
+          precastBindings: { world: ["world"], chest: [chestId], zone: [zoneId] },
           suppressConditions: true,
         });
       }

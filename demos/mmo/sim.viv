@@ -120,7 +120,7 @@ reserved action level-up:
 reserved action spawn-chest:
     gloss: "@chest appears in @zone"
     roles:
-        @adventurer:
+        @world:
             as: initiator
         @chest:
             as: item
