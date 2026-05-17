@@ -56,6 +56,57 @@ h1 {
   font-family: system-ui, sans-serif;
 }
 
+.scene-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.scene-label {
+  display: inline-block;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  font-family: system-ui, sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: var(--accent-lt);
+  color: var(--accent);
+}
+.scene-label.difficulty-easier { background: var(--success-lt); color: var(--success); }
+.scene-label.difficulty-harder { background: var(--warn-lt);    color: var(--warn); }
+
+.scene-switch {
+  padding: 0.3rem 0.85rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: system-ui, sans-serif;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.scene-switch:hover {
+  background: var(--bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.log-outcome {
+  font-size: 0.92rem;
+  color: var(--text);
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--accent-lt);
+  font-style: italic;
+}
+
+.log-jordan.jordan-cool {
+  border-color: #b9a8c0;
+  color: #5e4a6a;
+}
+
 /* ── Main layout ─────────────────────────────────────────────────────────── */
 main {
   max-width: 780px;
@@ -427,3 +478,8 @@ main {
   transition: opacity 0.15s;
 }
 .outcome button:hover { opacity: 0.8; }
+.outcome button + button {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
