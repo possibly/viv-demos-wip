@@ -77,17 +77,17 @@ export const ACTIONS = [
   { name: "invite-out",  label: "Invite them out",   desc: "Ask Jordan if they want to grab food." },
 ];
 
-// Gates buttons before the click. "apologize" mirrors its Viv-side condition;
-// "debate" is UI-only (Jordan must have spoken before there's anything to push back on).
+// Mirrors Viv-side gating conditions that matter for UI display.
+// Viv enforces the rules; this just lets us lock the button before the click.
 const UI_AVAILABILITY = {
-  "apologize": (rel, _turn) => (rel.tension ?? 0) > 20,
-  "debate":    (_rel, turn) => turn > 0,
+  "apologize": (rel) => (rel.tension ?? 0) > 20,
+  "debate":    (rel) => rel.hasSaid === true,
 };
 
-export function getAvailableActions(rel, turn = 0) {
+export function getAvailableActions(rel) {
   return ACTIONS.map(a => ({
     ...a,
-    available: !UI_AVAILABILITY[a.name] || UI_AVAILABILITY[a.name](rel, turn),
+    available: !UI_AVAILABILITY[a.name] || UI_AVAILABILITY[a.name](rel),
   }));
 }
 
@@ -99,6 +99,7 @@ const INITIAL_REL = {
   romance:    0,
   trust:      15,
   tension:    10,
+  hasSaid:    false,
 };
 
 function buildInitialState(EntityType) {
@@ -322,7 +323,7 @@ export function initGame({ initializeVivRuntime, attemptAction, selectAction, En
     },
 
     getAvailableActions() {
-      return getAvailableActions(state.entities.jordan, state.turn);
+      return getAvailableActions(state.entities.jordan);
     },
 
     async takeTurn(actionName) {

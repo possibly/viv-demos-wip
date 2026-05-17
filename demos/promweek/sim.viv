@@ -92,6 +92,8 @@ action debate:
             as: initiator
         @jordan:
             as: recipient
+    conditions:
+        @jordan.hasSaid == true
     effects:
         @jordan.respect += 12
         @jordan.friendship += 5
@@ -450,6 +452,7 @@ reserved action jordan-pulls-back:
     conditions:
         @jordan.tension >= 50
     effects:
+        @jordan.hasSaid = true
         @jordan.tension += 5
         @jordan.friendship -= 2
 
@@ -463,6 +466,7 @@ reserved action jordan-deflects:
     conditions:
         @jordan.volition == #GUARDED && @jordan.romance >= 20 && @jordan.trust < 45
     effects:
+        @jordan.hasSaid = true
         @jordan.tension += 4
         @jordan.romance -= 2
 
@@ -476,6 +480,7 @@ reserved action jordan-flusters:
     conditions:
         @jordan.volition == #PURSUIT && @jordan.romance >= 10
     effects:
+        @jordan.hasSaid = true
         @jordan.romance += 4
         @jordan.friendship += 2
 
@@ -489,6 +494,7 @@ reserved action jordan-reciprocates:
     conditions:
         @jordan.romance >= 45 && @jordan.friendship >= 50
     effects:
+        @jordan.hasSaid = true
         @jordan.romance += 5
         @jordan.trust += 3
 
@@ -502,6 +508,7 @@ reserved action jordan-tests-alex:
     conditions:
         @jordan.volition == #GUARDED && @jordan.friendship >= 25
     effects:
+        @jordan.hasSaid = true
         @jordan.respect += 3
 
 reserved action jordan-warms-up:
@@ -514,6 +521,7 @@ reserved action jordan-warms-up:
     conditions:
         @jordan.friendship >= 25 && @jordan.tension < 40
     effects:
+        @jordan.hasSaid = true
         @jordan.friendship += 3
 
 reserved action jordan-neutral:
@@ -523,3 +531,5 @@ reserved action jordan-neutral:
             as: initiator
         @alex:
             as: recipient
+    effects:
+        @jordan.hasSaid = true
