@@ -474,7 +474,7 @@ reserved action jordan-flusters:
         @alex:
             as: recipient
     conditions:
-        @jordan.volition == #PURSUIT && @jordan.romance >= 25
+        @jordan.volition == #PURSUIT && @jordan.romance >= 10
     effects:
         @jordan.romance += 4
         @jordan.friendship += 2
@@ -500,7 +500,7 @@ reserved action jordan-tests-alex:
         @alex:
             as: recipient
     conditions:
-        @jordan.volition == #GUARDED && @jordan.friendship >= 35
+        @jordan.volition == #GUARDED && @jordan.friendship >= 25
     effects:
         @jordan.respect += 3
 
@@ -512,7 +512,7 @@ reserved action jordan-warms-up:
         @alex:
             as: recipient
     conditions:
-        @jordan.friendship >= 40 && @jordan.tension < 40
+        @jordan.friendship >= 25 && @jordan.tension < 40
     effects:
         @jordan.friendship += 3
 
