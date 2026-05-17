@@ -1,4 +1,4 @@
-import { initializeVivRuntime, attemptAction, selectAction, EntityType } from "../shared/viv-runtime.js";
+import { initializeVivRuntime, attemptAction, selectAction, EntityType } from "../../shared/viv-runtime.js";
 import { initGame, SCENES } from "./sim.mjs";
 
 const runtime = { initializeVivRuntime, attemptAction, selectAction, EntityType };
