@@ -98,6 +98,25 @@ export const QUEST_GIVER = {
   id: "questGiver",
   name: "Elder Mira",
   location: "millhaven",
+  discoveryRate: 1.0,
+};
+
+export const RANGER_VOSS = {
+  id: "rangerVoss",
+  name: "Ranger Voss",
+  location: "stonewick",
+  discoveryRate: 1.0,
+};
+
+export const ALL_QUEST_GIVERS = [QUEST_GIVER, RANGER_VOSS];
+
+export const QUEST_ITEMS = {
+  captains_insignia: {
+    id: "captains_insignia",
+    name: "Captain's Insignia",
+    dropFrom: "grimspawn_captain",
+    dropChance: 1.0,
+  },
 };
 
 export const QUESTS = [
@@ -105,6 +124,7 @@ export const QUESTS = [
     id: "grimspawn_scout_patrol",
     name: "Scout Patrol",
     level: 1,
+    questGiverId: "questGiver",
     targetTemplate: "grimspawn_scout",
     targetZone: "briar_edge",
     targetCount: 3,
@@ -114,6 +134,7 @@ export const QUESTS = [
     id: "grimspawn_warrior_hunt",
     name: "Warrior Hunt",
     level: 2,
+    questGiverId: "questGiver",
     targetTemplate: "grimspawn_warrior",
     targetZone: "stillwater",
     targetCount: 2,
@@ -123,10 +144,22 @@ export const QUESTS = [
     id: "grimspawn_enforcer_purge",
     name: "Enforcer Purge",
     level: 3,
+    questGiverId: "questGiver",
     targetTemplate: "grimspawn_enforcer",
     targetZone: "stillwater",
     targetCount: 1,
     description: "Eliminate the Grimspawn Enforcer at Stillwater Mere.",
+  },
+  {
+    id: "captains_seal",
+    name: "The Captain's Seal",
+    level: 4,
+    questGiverId: "rangerVoss",
+    targetTemplate: "grimspawn_captain",
+    targetZone: "stillwater",
+    targetCount: 1,
+    questItem: "captains_insignia",
+    description: "Slay a Grimspawn Captain at Stillwater Mere and recover the Captain's Insignia.",
   },
 ];
 
@@ -134,10 +167,10 @@ export function questXpReward(questLevel) {
   return questLevel * 400;
 }
 
-export function pickQuestForAdventurer(adventurer) {
+export function pickQuestForAdventurer(adventurer, questGiverId) {
   const completed = adventurer.completedQuests ?? [];
   return QUESTS
-    .filter(q => !completed.includes(q.id) && q.level <= adventurer.level + 2)
+    .filter(q => !completed.includes(q.id) && q.level <= adventurer.level + 2 && q.questGiverId === questGiverId)
     .sort((a, b) => a.level - b.level)[0] ?? null;
 }
 
@@ -158,6 +191,19 @@ export const ZONE_ENEMIES = {
   stonewick:  ["grimspawn_scout"],
   stillwater: ["grimspawn_warrior", "grimspawn_enforcer", "grimspawn_captain", "grimspawn_warlord"],
 };
+
+// Unified discoverable NPC pool per zone. Contains only non-player characters (enemies, quest givers,
+// etc.) — player characters are never discoverable. Each entry is { id, discoveryRate }; role is
+// inferred from entity data after discovery (ENEMY_TEMPLATES membership, ALL_QUEST_GIVERS, etc.).
+export const ZONE_DISCOVERABLES = Object.fromEntries(
+  ZONES.map(z => [
+    z.id,
+    [
+      ...(ZONE_ENEMIES[z.id] ?? []).map(id => ({ id, discoveryRate: ENEMY_TEMPLATES[id].discoveryRate })),
+      ...ALL_QUEST_GIVERS.filter(qg => qg.location === z.id).map(qg => ({ id: qg.id, discoveryRate: qg.discoveryRate })),
+    ],
+  ])
+);
 
 export const WEAK_LOOT_ITEMS = [
   { name: "Tattered Cloth Hood",     powerLevel: 1, slot: "head" },
@@ -282,8 +328,7 @@ function generateCharacter(EntityType, rng) {
     inventory: [],
     equipment: getStarterEquipment(classKey, raceKey),
     factionRelationships: {},
-    discoveredEnemies: {},
-    discoveredQuestGivers: {},
+    discoveredNPCs: {},
     completedQuests: [],
     questActive: false,
     questEnemyFound: false,
@@ -310,9 +355,17 @@ function buildInitialState(EntityType) {
     memories: {},
   };
   entities[QUEST_GIVER.id] = questGiverEntity;
+  const rangerVossEntity = {
+    entityType: EntityType.Character,
+    id: RANGER_VOSS.id,
+    name: RANGER_VOSS.name,
+    location: RANGER_VOSS.location,
+    memories: {},
+  };
+  entities[RANGER_VOSS.id] = rangerVossEntity;
   return {
     timestamp: 0, entities,
-    characters: [character.id, QUEST_GIVER.id], locations,
+    characters: [character.id, QUEST_GIVER.id, RANGER_VOSS.id], locations,
     items: [], actions: [],
     vivInternalState: null,
     zoneEnemyStacks: {},
@@ -388,20 +441,25 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     const adventurer = state.entities["adventurer"];
     const locationID = adventurer.location;
     const zoneName = ZONES.find(z => z.id === locationID)?.name ?? locationID;
-    const allEnemiesHere = ZONE_ENEMIES[locationID] ?? [];
-    const discoveredHere = adventurer.discoveredEnemies[locationID] ?? [];
-    const undiscoveredEnemies = allEnemiesHere.filter(id => !discoveredHere.includes(id));
+    const discoveredHere = adventurer.discoveredNPCs[locationID] ?? [];
 
-    // Quest giver discovery state
-    const questGiverHere = QUEST_GIVER.location === locationID;
-    const questGiverDiscovered = (adventurer.discoveredQuestGivers?.[locationID] ?? []).includes(QUEST_GIVER.id);
-    const hasUndiscoveredQuestGiver = questGiverHere && !questGiverDiscovered;
+    // Undiscovered pool: any Viv character in this zone not yet found
+    const undiscoveredPool = (ZONE_DISCOVERABLES[locationID] ?? []).filter(d => !discoveredHere.includes(d.id));
+
+    // Quest givers already discovered here — used for auto-accept logic below
+    const discoveredQuestGiversHere = ALL_QUEST_GIVERS.filter(qg =>
+      qg.location === locationID && discoveredHere.includes(qg.id)
+    );
 
     // Update quest state flags read by Viv plan conditions
     if (adventurer.questActive) {
-      adventurer.questEnemyFound = (adventurer.discoveredEnemies[adventurer.questTargetZone] ?? []).includes(adventurer.questTargetTemplate);
-      adventurer.questHuntDone = (adventurer.questKillsDone ?? 0) >= (adventurer.questKillsNeeded ?? 1);
-      adventurer.questReadyToComplete = adventurer.questHuntDone && locationID === QUEST_GIVER.location;
+      adventurer.questEnemyFound = (adventurer.discoveredNPCs[adventurer.questTargetZone] ?? []).includes(adventurer.questTargetTemplate);
+      const killsDone = (adventurer.questKillsDone ?? 0) >= (adventurer.questKillsNeeded ?? 1);
+      const activeQuest = QUESTS.find(q => q.id === adventurer.questId);
+      const itemDone = !activeQuest?.questItem || adventurer.questItemCollected;
+      adventurer.questHuntDone = killsDone && itemDone;
+      // Use the stored questGiverLocation set at accept time (works for any quest giver)
+      adventurer.questReadyToComplete = adventurer.questHuntDone && locationID === adventurer.questGiverLocation;
 
       // Precompute pendingLevel for complete-quest's level-up reaction
       if (adventurer.questReadyToComplete) {
@@ -410,21 +468,25 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       }
     }
 
-    // Auto-queue accept-quest when at quest giver and not on a quest
-    if (!adventurer.questActive && questGiverDiscovered && questGiverHere) {
-      const nextQuest = pickQuestForAdventurer(adventurer);
-      if (nextQuest) {
-        adventurer.pendingQuestId = nextQuest.id;
-        adventurer.pendingQuestLevel = nextQuest.level;
-        adventurer.pendingQuestEligible = nextQuest.level <= adventurer.level + 2;
-        adventurer.pendingAcceptQuest = true;
+    // Auto-queue accept-quest when at a discovered quest giver and not on a quest
+    if (!adventurer.questActive && discoveredQuestGiversHere.length > 0) {
+      for (const qg of discoveredQuestGiversHere) {
+        const nextQuest = pickQuestForAdventurer(adventurer, qg.id);
+        if (nextQuest) {
+          adventurer.pendingQuestId = nextQuest.id;
+          adventurer.pendingQuestLevel = nextQuest.level;
+          adventurer.pendingQuestEligible = nextQuest.level <= adventurer.level + 2;
+          adventurer.pendingAcceptQuestGiverId = qg.id;
+          adventurer.pendingAcceptQuest = true;
+          break;
+        }
       }
     }
 
     // Viv's quest-directed selector handles all quest-phase routing; these flags just expose
     // what's possible at the current location and are read as conditions by Viv actions.
-    adventurer.canFight = discoveredHere.length > 0;
-    adventurer.canScout = undiscoveredEnemies.length > 0 || hasUndiscoveredQuestGiver;
+    adventurer.canFight = discoveredHere.some(id => id in ENEMY_TEMPLATES);
+    adventurer.canScout = undiscoveredPool.length > 0;
 
     const events = [];
 
@@ -432,18 +494,21 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     if (adventurer.pendingAcceptQuest) {
       adventurer.pendingAcceptQuest = false;
       const quest = QUESTS.find(q => q.id === adventurer.pendingQuestId);
-      const questBindings = { adventurer: ["adventurer"], questGiver: [QUEST_GIVER.id] };
+      const activeQuestGiverId = adventurer.pendingAcceptQuestGiverId ?? QUEST_GIVER.id;
+      const questBindings = { adventurer: ["adventurer"], questGiver: [activeQuestGiverId] };
       const acceptBefore = new Set(state.actions);
       await attemptAction({ actionName: "accept-quest", initiatorID: "adventurer", precastBindings: questBindings });
       const newAcceptIDs = state.actions.filter(id => !acceptBefore.has(id));
       if (newAcceptIDs.length > 0 && quest) {
         adventurer.questId = quest.id;
+        adventurer.questGiverId = activeQuestGiverId;
         adventurer.questTargetTemplate = quest.targetTemplate;
         adventurer.questTargetZone = quest.targetZone;
         adventurer.questKillsNeeded = quest.targetCount;
         adventurer.questKillsDone = 0;
+        adventurer.questItemCollected = false;
         adventurer.questXpReward = questXpReward(quest.level);
-        adventurer.questEnemyFound = (adventurer.discoveredEnemies[quest.targetZone] ?? []).includes(quest.targetTemplate);
+        adventurer.questEnemyFound = (adventurer.discoveredNPCs[quest.targetZone] ?? []).includes(quest.targetTemplate);
         adventurer.questHuntDone = false;
         adventurer.questReadyToComplete = false;
         newAcceptIDs.forEach(id => {
@@ -465,9 +530,10 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
     if (selectedActionName === "fight") {
       // Bias toward quest target when Viv selects fight during the hunt phase
+      const enemiesDiscoveredHere = discoveredHere.filter(id => id in ENEMY_TEMPLATES);
       const inHuntPhase = adventurer.questActive && (adventurer.questEnemyFound ?? false) && !(adventurer.questHuntDone ?? false);
-      const questTargetHere = inHuntPhase && locationID === adventurer.questTargetZone && discoveredHere.includes(adventurer.questTargetTemplate);
-      const templateId = questTargetHere ? adventurer.questTargetTemplate : pickRandom(rng, discoveredHere);
+      const questTargetHere = inHuntPhase && locationID === adventurer.questTargetZone && enemiesDiscoveredHere.includes(adventurer.questTargetTemplate);
+      const templateId = questTargetHere ? adventurer.questTargetTemplate : pickRandom(rng, enemiesDiscoveredHere);
 
       let enemyId = firstAliveEnemyOfTemplate(locationID, templateId);
       if (!enemyId) enemyId = spawnEnemy(templateId, locationID);
@@ -510,6 +576,18 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
           adventurer.questKillsDone = (adventurer.questKillsDone ?? 0) + 1;
         }
 
+        // Quest item drop — only when the player has the quest and hasn't collected it yet
+        if (adventurer.questActive && !adventurer.questItemCollected) {
+          const activeQuest = QUESTS.find(q => q.id === adventurer.questId);
+          if (activeQuest?.questItem) {
+            const questItemDef = QUEST_ITEMS[activeQuest.questItem];
+            if (questItemDef?.dropFrom === enemy.templateId && rng() < (questItemDef.dropChance ?? 1.0)) {
+              adventurer.questItemCollected = true;
+              events.push({ text: `${adventurer.name} recovers the ${questItemDef.name}!`, type: "loot" });
+            }
+          }
+        }
+
         // Drain all urgent reactions: level-up → loot-item → equip-item
         while (true) {
           const urgentBefore = new Set(state.actions);
@@ -546,28 +624,29 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       }
 
     } else if (selectedActionName === "look-around") {
-      if (hasUndiscoveredQuestGiver) {
-        // Discover quest giver (always 100%)
-        if (!adventurer.discoveredQuestGivers[locationID]) adventurer.discoveredQuestGivers[locationID] = [];
-        adventurer.discoveredQuestGivers[locationID].push(QUEST_GIVER.id);
-        events.push({ text: `${adventurer.name} meets ${QUEST_GIVER.name} in ${zoneName}!`, type: "scouting" });
-      } else if (undiscoveredEnemies.length > 0) {
-        // Prioritize the quest target so the adventurer finds it before other enemies in the zone
-        const questTargetUndiscovered = adventurer.questActive &&
-          !adventurer.questEnemyFound &&
-          undiscoveredEnemies.includes(adventurer.questTargetTemplate);
-        const foundId = questTargetUndiscovered
-          ? adventurer.questTargetTemplate
-          : pickRandom(rng, undiscoveredEnemies);
-        const enemy = ENEMY_TEMPLATES[foundId];
-        if (rng() < enemy.discoveryRate) {
-          if (!adventurer.discoveredEnemies[locationID]) adventurer.discoveredEnemies[locationID] = [];
-          adventurer.discoveredEnemies[locationID].push(foundId);
-          const factionId = enemy.faction;
-          const newFaction = !(factionId in adventurer.factionRelationships);
-          if (newFaction) adventurer.factionRelationships[factionId] = initialFactionRep(factionId);
-          const factionNote = newFaction ? ` ${FACTIONS[factionId]?.name ?? factionId} added to known factions.` : "";
-          events.push({ text: `${adventurer.name} spots a level ${enemy.level} ${enemy.name} in ${zoneName}.${factionNote}`, type: "scouting" });
+      if (undiscoveredPool.length > 0) {
+        // When on a quest, bias toward the quest target if it's still undiscovered
+        const questTargetEntry = (adventurer.questActive && !adventurer.questEnemyFound)
+          ? undiscoveredPool.find(d => d.id === adventurer.questTargetTemplate)
+          : null;
+        const chosen = questTargetEntry ?? pickRandom(rng, undiscoveredPool);
+
+        if (rng() < chosen.discoveryRate) {
+          if (!adventurer.discoveredNPCs[locationID]) adventurer.discoveredNPCs[locationID] = [];
+          adventurer.discoveredNPCs[locationID].push(chosen.id);
+
+          // Infer role from entity data: enemy template vs quest giver
+          const enemyTemplate = ENEMY_TEMPLATES[chosen.id];
+          if (enemyTemplate) {
+            const factionId = enemyTemplate.faction;
+            const newFaction = !(factionId in adventurer.factionRelationships);
+            if (newFaction) adventurer.factionRelationships[factionId] = initialFactionRep(factionId);
+            const factionNote = newFaction ? ` ${FACTIONS[factionId]?.name ?? factionId} added to known factions.` : "";
+            events.push({ text: `${adventurer.name} spots a level ${enemyTemplate.level} ${enemyTemplate.name} in ${zoneName}.${factionNote}`, type: "scouting" });
+          } else {
+            const questGiver = ALL_QUEST_GIVERS.find(qg => qg.id === chosen.id);
+            events.push({ text: `${adventurer.name} meets ${questGiver.name} in ${zoneName}!`, type: "scouting" });
+          }
         } else {
           events.push({ text: `${adventurer.name} searches ${zoneName} but finds nothing unusual.`, type: "scouting" });
         }
@@ -578,9 +657,10 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         const a = state.entities[id];
         events.push({ text: a.report ?? a.gloss ?? "(action)", type: "quest" });
       });
-      const quest = QUESTS.find(q => q.id === adventurer.questId);
-      events.push({ text: `${adventurer.name} receives ${adventurer.questXpReward} XP from ${QUEST_GIVER.name}!`, type: "quest" });
+      const activeGiver = ALL_QUEST_GIVERS.find(qg => qg.id === adventurer.questGiverId) ?? QUEST_GIVER;
+      events.push({ text: `${adventurer.name} receives ${adventurer.questXpReward} XP from ${activeGiver.name}!`, type: "quest" });
       adventurer.completedQuests = [...(adventurer.completedQuests ?? []), adventurer.questId];
+      adventurer.questItemCollected = false;
 
       // Fire level-up if queued by complete-quest's reaction
       const levelUpBefore = new Set(state.actions);
