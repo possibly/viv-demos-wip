@@ -192,14 +192,15 @@ export const ZONE_ENEMIES = {
   stillwater: ["grimspawn_warrior", "grimspawn_enforcer", "grimspawn_captain", "grimspawn_warlord"],
 };
 
-// Unified discoverable pool per zone: enemies and quest-giver NPCs share the same discovery queue.
-// Each entry carries a discoveryRate so look-around uses identical RNG logic for both types.
+// Unified discoverable pool per zone: all discoverable Viv characters (enemies, quest givers, etc.)
+// share the same queue. Each entry is { id, discoveryRate }; role is inferred from entity data
+// after discovery (ENEMY_TEMPLATES membership, ALL_QUEST_GIVERS membership, etc.).
 export const ZONE_DISCOVERABLES = Object.fromEntries(
   ZONES.map(z => [
     z.id,
     [
-      ...(ZONE_ENEMIES[z.id] ?? []).map(id => ({ id, type: "enemy", discoveryRate: ENEMY_TEMPLATES[id].discoveryRate })),
-      ...ALL_QUEST_GIVERS.filter(qg => qg.location === z.id).map(qg => ({ id: qg.id, type: "questGiver", discoveryRate: qg.discoveryRate })),
+      ...(ZONE_ENEMIES[z.id] ?? []).map(id => ({ id, discoveryRate: ENEMY_TEMPLATES[id].discoveryRate })),
+      ...ALL_QUEST_GIVERS.filter(qg => qg.location === z.id).map(qg => ({ id: qg.id, discoveryRate: qg.discoveryRate })),
     ],
   ])
 );
@@ -327,8 +328,7 @@ function generateCharacter(EntityType, rng) {
     inventory: [],
     equipment: getStarterEquipment(classKey, raceKey),
     factionRelationships: {},
-    discoveredEnemies: {},
-    discoveredQuestGivers: {},
+    discoveredCharacters: {},
     completedQuests: [],
     questActive: false,
     questEnemyFound: false,
@@ -441,23 +441,19 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     const adventurer = state.entities["adventurer"];
     const locationID = adventurer.location;
     const zoneName = ZONES.find(z => z.id === locationID)?.name ?? locationID;
-    const discoveredHere = adventurer.discoveredEnemies[locationID] ?? [];
+    const discoveredHere = adventurer.discoveredCharacters[locationID] ?? [];
 
-    // Unified undiscovered pool: enemies and quest-giver NPCs share the same discovery queue
-    const undiscoveredPool = (ZONE_DISCOVERABLES[locationID] ?? []).filter(d => {
-      if (d.type === "enemy") return !discoveredHere.includes(d.id);
-      return !(adventurer.discoveredQuestGivers?.[locationID] ?? []).includes(d.id);
-    });
+    // Undiscovered pool: any Viv character in this zone not yet found
+    const undiscoveredPool = (ZONE_DISCOVERABLES[locationID] ?? []).filter(d => !discoveredHere.includes(d.id));
 
     // Quest givers already discovered here — used for auto-accept logic below
     const discoveredQuestGiversHere = ALL_QUEST_GIVERS.filter(qg =>
-      qg.location === locationID &&
-      (adventurer.discoveredQuestGivers?.[locationID] ?? []).includes(qg.id)
+      qg.location === locationID && discoveredHere.includes(qg.id)
     );
 
     // Update quest state flags read by Viv plan conditions
     if (adventurer.questActive) {
-      adventurer.questEnemyFound = (adventurer.discoveredEnemies[adventurer.questTargetZone] ?? []).includes(adventurer.questTargetTemplate);
+      adventurer.questEnemyFound = (adventurer.discoveredCharacters[adventurer.questTargetZone] ?? []).includes(adventurer.questTargetTemplate);
       const killsDone = (adventurer.questKillsDone ?? 0) >= (adventurer.questKillsNeeded ?? 1);
       const activeQuest = QUESTS.find(q => q.id === adventurer.questId);
       const itemDone = !activeQuest?.questItem || adventurer.questItemCollected;
@@ -489,7 +485,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
     // Viv's quest-directed selector handles all quest-phase routing; these flags just expose
     // what's possible at the current location and are read as conditions by Viv actions.
-    adventurer.canFight = discoveredHere.length > 0;
+    adventurer.canFight = discoveredHere.some(id => id in ENEMY_TEMPLATES);
     adventurer.canScout = undiscoveredPool.length > 0;
 
     const events = [];
@@ -512,7 +508,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         adventurer.questKillsDone = 0;
         adventurer.questItemCollected = false;
         adventurer.questXpReward = questXpReward(quest.level);
-        adventurer.questEnemyFound = (adventurer.discoveredEnemies[quest.targetZone] ?? []).includes(quest.targetTemplate);
+        adventurer.questEnemyFound = (adventurer.discoveredCharacters[quest.targetZone] ?? []).includes(quest.targetTemplate);
         adventurer.questHuntDone = false;
         adventurer.questReadyToComplete = false;
         newAcceptIDs.forEach(id => {
@@ -534,9 +530,10 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
     if (selectedActionName === "fight") {
       // Bias toward quest target when Viv selects fight during the hunt phase
+      const enemiesDiscoveredHere = discoveredHere.filter(id => id in ENEMY_TEMPLATES);
       const inHuntPhase = adventurer.questActive && (adventurer.questEnemyFound ?? false) && !(adventurer.questHuntDone ?? false);
-      const questTargetHere = inHuntPhase && locationID === adventurer.questTargetZone && discoveredHere.includes(adventurer.questTargetTemplate);
-      const templateId = questTargetHere ? adventurer.questTargetTemplate : pickRandom(rng, discoveredHere);
+      const questTargetHere = inHuntPhase && locationID === adventurer.questTargetZone && enemiesDiscoveredHere.includes(adventurer.questTargetTemplate);
+      const templateId = questTargetHere ? adventurer.questTargetTemplate : pickRandom(rng, enemiesDiscoveredHere);
 
       let enemyId = firstAliveEnemyOfTemplate(locationID, templateId);
       if (!enemyId) enemyId = spawnEnemy(templateId, locationID);
@@ -628,26 +625,26 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
     } else if (selectedActionName === "look-around") {
       if (undiscoveredPool.length > 0) {
-        // When on a quest, bias toward the quest target enemy if it's still undiscovered
+        // When on a quest, bias toward the quest target if it's still undiscovered
         const questTargetEntry = (adventurer.questActive && !adventurer.questEnemyFound)
-          ? undiscoveredPool.find(d => d.type === "enemy" && d.id === adventurer.questTargetTemplate)
+          ? undiscoveredPool.find(d => d.id === adventurer.questTargetTemplate)
           : null;
         const chosen = questTargetEntry ?? pickRandom(rng, undiscoveredPool);
 
         if (rng() < chosen.discoveryRate) {
-          if (chosen.type === "enemy") {
-            if (!adventurer.discoveredEnemies[locationID]) adventurer.discoveredEnemies[locationID] = [];
-            adventurer.discoveredEnemies[locationID].push(chosen.id);
-            const enemy = ENEMY_TEMPLATES[chosen.id];
-            const factionId = enemy.faction;
+          if (!adventurer.discoveredCharacters[locationID]) adventurer.discoveredCharacters[locationID] = [];
+          adventurer.discoveredCharacters[locationID].push(chosen.id);
+
+          // Infer role from entity data: enemy template vs quest giver
+          const enemyTemplate = ENEMY_TEMPLATES[chosen.id];
+          if (enemyTemplate) {
+            const factionId = enemyTemplate.faction;
             const newFaction = !(factionId in adventurer.factionRelationships);
             if (newFaction) adventurer.factionRelationships[factionId] = initialFactionRep(factionId);
             const factionNote = newFaction ? ` ${FACTIONS[factionId]?.name ?? factionId} added to known factions.` : "";
-            events.push({ text: `${adventurer.name} spots a level ${enemy.level} ${enemy.name} in ${zoneName}.${factionNote}`, type: "scouting" });
+            events.push({ text: `${adventurer.name} spots a level ${enemyTemplate.level} ${enemyTemplate.name} in ${zoneName}.${factionNote}`, type: "scouting" });
           } else {
             const questGiver = ALL_QUEST_GIVERS.find(qg => qg.id === chosen.id);
-            if (!adventurer.discoveredQuestGivers[locationID]) adventurer.discoveredQuestGivers[locationID] = [];
-            adventurer.discoveredQuestGivers[locationID].push(chosen.id);
             events.push({ text: `${adventurer.name} meets ${questGiver.name} in ${zoneName}!`, type: "scouting" });
           }
         } else {

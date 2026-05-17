@@ -179,7 +179,7 @@ function renderModal(char) {
     </div>`;
 }
 
-function renderZonemap(currentLocationID, discoveredEnemies, discoveredQuestGivers) {
+function renderZonemap(currentLocationID, discoveredCharacters) {
   zonemapEl.innerHTML = "";
   for (const z of ZONES) {
     const el = document.createElement("div");
@@ -188,7 +188,9 @@ function renderZonemap(currentLocationID, discoveredEnemies, discoveredQuestGive
       (z.id === currentLocationID ? " active" : "") +
       (isDanger ? " danger" : "");
 
-    const discovered = (discoveredEnemies?.[z.id] ?? [])
+    const knownHere = discoveredCharacters?.[z.id] ?? [];
+
+    const discovered = knownHere
       .map(id => ENEMY_TEMPLATES[id])
       .filter(Boolean)
       .sort((a, b) => a.level - b.level);
@@ -197,9 +199,7 @@ function renderZonemap(currentLocationID, discoveredEnemies, discoveredQuestGive
       ? `<div class="zone-enemies">${discovered.map(e => `<span class="zone-enemy">${e.name} · Lv. ${e.level}</span>`).join("")}</div>`
       : "";
 
-    const knownGivers = ALL_QUEST_GIVERS.filter(qg =>
-      qg.location === z.id && (discoveredQuestGivers?.[z.id] ?? []).includes(qg.id)
-    );
+    const knownGivers = ALL_QUEST_GIVERS.filter(qg => qg.location === z.id && knownHere.includes(qg.id));
     const giverHTML = knownGivers.length > 0
       ? `<div class="zone-quest-giver">${knownGivers.map(qg => `<span class="zone-npc">&#x1F4DC; ${qg.name}</span>`).join("")}</div>`
       : "";
@@ -218,7 +218,7 @@ function render() {
   btnNext.disabled = currentTick === simData.ticks.length - 1;
 
   renderCharCard(tick.character);
-  renderZonemap(tick.character.location, tick.character.discoveredEnemies, tick.character.discoveredQuestGivers);
+  renderZonemap(tick.character.location, tick.character.discoveredCharacters);
   if (!charModalEl.hidden) renderModal(tick.character);
 
   eventsEl.innerHTML = "";
