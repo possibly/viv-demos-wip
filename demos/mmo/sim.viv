@@ -204,4 +204,4 @@ reserved action-selector free-roaming:
     target with weights:
         (1) wander;
         (1) fight;
-        (1) look-around;
+        (3) look-around;
