@@ -80,6 +80,14 @@ reserved action kill:
                     @cause: @enemy
                 urgent: true
         end
+        if @adventurer.pendingLootId:
+            queue action loot-item:
+                with:
+                    @adventurer: @adventurer
+                    @enemy: @enemy
+                    @item: @adventurer.pendingLootId?
+                urgent: true
+        end
 
 reserved action retreat:
     gloss: "@adventurer retreats from @enemy"
@@ -108,6 +116,38 @@ reserved action level-up:
             n: 0-1
     effects:
         @adventurer.level = @adventurer.pendingLevel
+
+reserved action loot-item:
+    gloss: "@adventurer loots @item from @enemy"
+    roles:
+        @adventurer:
+            as: initiator
+        @item:
+            as: item
+        @enemy:
+            as: recipient
+    effects:
+        @adventurer.pendingLootId = false
+    reactions:
+        if @adventurer.shouldEquipLoot:
+            queue action equip-item:
+                with:
+                    @adventurer: @adventurer
+                    @item: @item
+                urgent: true
+        end
+
+reserved action equip-item:
+    gloss: "@adventurer equips @item"
+    roles:
+        @adventurer:
+            as: initiator
+        @item:
+            as: item
+    conditions:
+        @adventurer.shouldEquipLoot
+    effects:
+        @adventurer.shouldEquipLoot = false
 
 reserved action accept-quest:
     gloss: "@adventurer accepts the quest from @questGiver"

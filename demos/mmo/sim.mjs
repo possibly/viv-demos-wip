@@ -160,21 +160,21 @@ export const ZONE_ENEMIES = {
 };
 
 export const WEAK_LOOT_ITEMS = [
-  { name: "Tattered Cloth Hood",     powerLevel: 1 },
-  { name: "Worn Leather Gloves",     powerLevel: 1 },
-  { name: "Rusty Iron Knife",        powerLevel: 1 },
-  { name: "Crude Wooden Club",       powerLevel: 1 },
-  { name: "Frayed Linen Bracers",    powerLevel: 1 },
-  { name: "Battered Iron Helm",      powerLevel: 2 },
-  { name: "Scratched Leather Boots", powerLevel: 2 },
-  { name: "Chipped Short Sword",     powerLevel: 2 },
-  { name: "Old Iron Mace",           powerLevel: 2 },
-  { name: "Dented Iron Shield",      powerLevel: 2 },
-  { name: "Rough-spun Chain Coif",   powerLevel: 3 },
-  { name: "Scuffed Iron Pauldrons",  powerLevel: 3 },
-  { name: "Notched Broadsword",      powerLevel: 3 },
-  { name: "Crude Iron Axe",          powerLevel: 3 },
-  { name: "Pitted Iron Gauntlets",   powerLevel: 3 },
+  { name: "Tattered Cloth Hood",     powerLevel: 1, slot: "head" },
+  { name: "Worn Leather Gloves",     powerLevel: 1, slot: "hands" },
+  { name: "Rusty Iron Knife",        powerLevel: 1, slot: "mainhand" },
+  { name: "Crude Wooden Club",       powerLevel: 1, slot: "mainhand" },
+  { name: "Frayed Linen Bracers",    powerLevel: 1, slot: "wrist" },
+  { name: "Battered Iron Helm",      powerLevel: 2, slot: "head" },
+  { name: "Scratched Leather Boots", powerLevel: 2, slot: "feet" },
+  { name: "Chipped Short Sword",     powerLevel: 2, slot: "mainhand" },
+  { name: "Old Iron Mace",           powerLevel: 2, slot: "mainhand" },
+  { name: "Dented Iron Shield",      powerLevel: 2, slot: "offhand" },
+  { name: "Rough-spun Chain Coif",   powerLevel: 3, slot: "head" },
+  { name: "Scuffed Iron Pauldrons",  powerLevel: 3, slot: "shoulders" },
+  { name: "Notched Broadsword",      powerLevel: 3, slot: "mainhand" },
+  { name: "Crude Iron Axe",          powerLevel: 3, slot: "mainhand" },
+  { name: "Pitted Iron Gauntlets",   powerLevel: 3, slot: "hands" },
 ];
 
 export function copperToString(total) {
@@ -483,6 +483,21 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       const combatBindings = { adventurer: ["adventurer"], enemy: [enemyId] };
 
       if (playerWins) {
+        // Generate loot before kill fires so the kill reaction can queue loot-item
+        const loot = generateLoot(rng, enemy);
+        let lootItemId = null;
+        if (loot.item) {
+          lootItemId = makeUUID(rng);
+          state.entities[lootItemId] = { entityType: EntityType.Item, id: lootItemId, location: locationID, ...loot.item };
+          state.items.push(lootItemId);
+          adventurer.pendingLootId = lootItemId;
+          adventurer.shouldEquipLoot = loot.item.powerLevel > (adventurer.equipment[loot.item.slot]?.powerLevel ?? 0);
+          adventurer.pendingEquipSlot = loot.item.slot;
+        } else {
+          adventurer.pendingLootId = false;
+          adventurer.shouldEquipLoot = false;
+        }
+
         const killBefore = new Set(state.actions);
         await attemptAction({ actionName: "kill", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
         state.actions.filter(id => !killBefore.has(id)).forEach(id => {
@@ -495,21 +510,31 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
           adventurer.questKillsDone = (adventurer.questKillsDone ?? 0) + 1;
         }
 
-        const levelUpBefore = new Set(state.actions);
-        await selectAction({ initiatorID: "adventurer", urgentOnly: true });
-        state.actions.filter(id => !levelUpBefore.has(id)).forEach(id => {
-          const a = state.entities[id];
-          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
-        });
+        // Drain all urgent reactions: level-up → loot-item → equip-item
+        while (true) {
+          const urgentBefore = new Set(state.actions);
+          await selectAction({ initiatorID: "adventurer", urgentOnly: true });
+          const urgentNew = state.actions.filter(id => !urgentBefore.has(id));
+          if (urgentNew.length === 0) break;
+          urgentNew.forEach(id => {
+            const a = state.entities[id];
+            const evType = (a.name === "loot-item" || a.name === "equip-item") ? "loot" : "victory";
+            events.push({ text: a.report ?? a.gloss ?? "(action)", type: evType });
+            if (a.name === "equip-item" && lootItemId) {
+              const slot = adventurer.pendingEquipSlot;
+              const item = state.entities[lootItemId];
+              if (slot && item) {
+                adventurer.equipment[slot] = { name: item.name, powerLevel: item.powerLevel };
+                adventurer.inventory = [...(adventurer.inventory ?? []), item];
+              }
+            }
+          });
+        }
 
-        const loot = generateLoot(rng, enemy);
+        // Copper drop is a simple JS-level event (not in action graph)
         if (loot.copper > 0) {
           adventurer.copper = (adventurer.copper ?? 0) + loot.copper;
           events.push({ text: `${adventurer.name} picks up ${loot.copper} copper.`, type: "loot" });
-        }
-        if (loot.item) {
-          adventurer.inventory = [...(adventurer.inventory ?? []), loot.item];
-          events.push({ text: `${adventurer.name} finds a ${loot.item.name} (power ${loot.item.powerLevel})!`, type: "loot" });
         }
       } else {
         const retreatBefore = new Set(state.actions);
