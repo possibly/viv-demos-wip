@@ -1,9 +1,47 @@
-// Promweek — one scene between Alex and Jordan
-// Social actions gated by relationship-derived precondition flags.
-// All effects are computed in JS (personality-modulated); Viv owns the
-// action vocabulary, precondition checks, and narrative gloss.
+// Promweek — one scene between Alex and Jordan, driven by Jordan's volition.
+//
+// Two scene variants pre-set Jordan's volition before any player turn:
+//   #PURSUIT (easier) — Jordan is quietly hoping Alex will pursue them.
+//                      Reciprocation comes sooner, flirting lands faster,
+//                      missteps cost less.
+//   #GUARDED (harder) — Jordan was burned recently. They'll give Alex a fair
+//                      chance, but romance and trust accrete slowly and the
+//                      pull-back reaction is much more common.
+//
+// Each player click resolves as a parent "intent" action whose reactions queue
+//   1. an outcome action-selector that picks the right variant (urgent), then
+//   2. a Jordan response action-selector that picks Jordan's reaction (urgent).
+//
+// Both the outcome variants and Jordan's reactions reference @jordan.volition
+// in their conditions, so the volition genuinely changes who-fires-when —
+// not just the size of a delta. All relationship effects live in Viv effects
+// blocks; the host only renders narrative variation.
 
-// ── Alex's actions (player-controlled) ──────────────────────────────────────
+
+// ── Scene setup ─────────────────────────────────────────────────────────────
+
+reserved action scene-opens-pursuit:
+    gloss: "Jordan is at their locker, glancing over at @alex twice already this morning."
+    roles:
+        @jordan:
+            as: initiator
+        @alex:
+            as: recipient
+    effects:
+        @jordan.volition = #PURSUIT
+
+reserved action scene-opens-guarded:
+    gloss: "Jordan is at their locker. Word in the hallway is something went sideways with someone last month."
+    roles:
+        @jordan:
+            as: initiator
+        @alex:
+            as: recipient
+    effects:
+        @jordan.volition = #GUARDED
+
+
+// ── Intent: small-talk ──────────────────────────────────────────────────────
 
 action small-talk:
     gloss: "@alex makes small talk with @jordan"
@@ -12,72 +50,63 @@ action small-talk:
             as: initiator
         @jordan:
             as: recipient
+    effects:
+        @jordan.friendship += 3
+        if @jordan.tension > 0:
+            @jordan.tension -= 1
+        end
+    reactions:
+        queue action-selector jordan-responds:
+            with:
+                @jordan: @jordan
+                @alex: @alex
+            urgent: true
 
-action compliment:
-    gloss: "@alex compliments @jordan"
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
+
+// ── Intent: ask-opinion ─────────────────────────────────────────────────────
 
 action ask-opinion:
-    gloss: "@alex asks @jordan for their opinion"
+    gloss: "@alex asks @jordan for their honest opinion"
     roles:
         @alex:
             as: initiator
         @jordan:
             as: recipient
+    effects:
+        @jordan.respect += 7
+        @jordan.friendship += 3
+    reactions:
+        queue action-selector jordan-responds:
+            with:
+                @jordan: @jordan
+                @alex: @alex
+            urgent: true
 
-action share-gossip:
-    gloss: "@alex leans in and shares some gossip with @jordan"
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    conditions:
-        @alex.canGossip
 
-action flirt:
-    gloss: "@alex flirts with @jordan"
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    conditions:
-        @alex.canFlirt
+// ── Intent: debate ──────────────────────────────────────────────────────────
 
-action challenge-debate:
-    gloss: "@alex challenges @jordan to a debate"
+action debate:
+    gloss: "@alex pushes back on something @jordan said"
     roles:
         @alex:
             as: initiator
         @jordan:
             as: recipient
-    conditions:
-        @alex.canChallenge
+    effects:
+        @jordan.respect += 12
+        @jordan.friendship += 5
+        if @jordan.tension > 0:
+            @jordan.tension -= 2
+        end
+    reactions:
+        queue action-selector jordan-responds:
+            with:
+                @jordan: @jordan
+                @alex: @alex
+            urgent: true
 
-action ask-for-help:
-    gloss: "@alex asks @jordan for help"
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    conditions:
-        @alex.canAskHelp
 
-action tease:
-    gloss: "@alex playfully teases @jordan"
-    roles:
-        @alex:
-            as: initiator
-        @jordan:
-            as: recipient
-    conditions:
-        @alex.canTease
+// ── Intent: apologize (gated on tension) ────────────────────────────────────
 
 action apologize:
     gloss: "@alex apologizes to @jordan"
@@ -87,72 +116,408 @@ action apologize:
         @jordan:
             as: recipient
     conditions:
-        @alex.canApologize
+        @jordan.tension > 20
+    effects:
+        @jordan.tension -= 18
+        @jordan.trust += 6
+    reactions:
+        queue action-selector jordan-responds:
+            with:
+                @jordan: @jordan
+                @alex: @alex
+            urgent: true
+
+
+// ── Intent: compliment (variant outcomes) ───────────────────────────────────
+
+action compliment:
+    gloss: "@alex compliments @jordan"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    reactions:
+        queue action-selector compliment-outcome:
+            with:
+                @alex: @alex
+                @jordan: @jordan
+            urgent: true
+        queue action-selector jordan-responds:
+            with:
+                @jordan: @jordan
+                @alex: @alex
+            urgent: true
+
+reserved action-selector compliment-outcome:
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    target in order:
+        compliment-lands:
+            with:
+                @alex: @alex
+                @jordan: @jordan
+        compliment-falls-flat:
+            with:
+                @alex: @alex
+                @jordan: @jordan
+
+reserved action compliment-lands:
+    gloss: "The compliment lands — @jordan looks genuinely surprised, the good kind"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    conditions:
+        @jordan.friendship >= 30 || @jordan.volition == #PURSUIT
+    effects:
+        @jordan.friendship += 6
+        @jordan.romance += 2
+
+reserved action compliment-falls-flat:
+    gloss: "@jordan smiles the polite-not-pleased smile"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    effects:
+        @jordan.friendship += 1
+        @jordan.respect -= 3
+
+
+// ── Intent: flirt (variant outcomes — volition matters a lot) ───────────────
+
+action flirt:
+    gloss: "@alex flirts with @jordan"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    reactions:
+        queue action-selector flirt-outcome:
+            with:
+                @alex: @alex
+                @jordan: @jordan
+            urgent: true
+        queue action-selector jordan-responds:
+            with:
+                @jordan: @jordan
+                @alex: @alex
+            urgent: true
+
+reserved action-selector flirt-outcome:
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    target in order:
+        flirt-clicks:
+            with:
+                @alex: @alex
+                @jordan: @jordan
+        flirt-lands:
+            with:
+                @alex: @alex
+                @jordan: @jordan
+        flirt-falls-flat:
+            with:
+                @alex: @alex
+                @jordan: @jordan
+
+reserved action flirt-clicks:
+    gloss: "The line lands — @jordan actually laughs, a short surprised sound"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    conditions:
+        @jordan.romance >= 35 || (@jordan.volition == #PURSUIT && @jordan.friendship >= 25)
+    effects:
+        @jordan.romance += 11
+        @jordan.friendship += 3
+
+reserved action flirt-lands:
+    gloss: "The line lands and @jordan looks away first — there's color in their face"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    conditions:
+        @jordan.romance >= 15 || @jordan.volition == #PURSUIT
+    effects:
+        @jordan.romance += 7
+        @jordan.tension += 3
+
+reserved action flirt-falls-flat:
+    gloss: "@jordan's expression does something careful, a half-smile that keeps @alex at arm's length"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    effects:
+        @jordan.tension += 14
+        @jordan.friendship -= 2
+
+
+// ── Intent: confide (variant outcomes — trust gated) ────────────────────────
 
 action confide:
-    gloss: "@alex confides something personal in @jordan"
+    gloss: "@alex confides something personal to @jordan"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    reactions:
+        queue action-selector confide-outcome:
+            with:
+                @alex: @alex
+                @jordan: @jordan
+            urgent: true
+        queue action-selector jordan-responds:
+            with:
+                @jordan: @jordan
+                @alex: @alex
+            urgent: true
+
+reserved action-selector confide-outcome:
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    target in order:
+        confide-deepens:
+            with:
+                @alex: @alex
+                @jordan: @jordan
+        confide-too-early:
+            with:
+                @alex: @alex
+                @jordan: @jordan
+
+reserved action confide-deepens:
+    gloss: '@jordan listens without interrupting, then quietly: "I get that"'
     roles:
         @alex:
             as: initiator
         @jordan:
             as: recipient
     conditions:
-        @alex.canConfide
+        @jordan.trust >= 40 || (@jordan.volition == #PURSUIT && @jordan.friendship >= 35)
+    effects:
+        @jordan.trust += 17
+        @jordan.friendship += 11
+        @jordan.romance += 5
+        if @jordan.tension > 0:
+            @jordan.tension -= 4
+        end
+
+reserved action confide-too-early:
+    gloss: "@jordan absorbs it quietly. They didn't ask for this much, this fast."
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    effects:
+        @jordan.trust += 3
+        @jordan.tension += 6
+
+
+// ── Intent: invite-out (variant outcomes — friendship gated) ────────────────
 
 action invite-out:
-    gloss: "@alex invites @jordan somewhere"
+    gloss: "@alex asks @jordan if they want to grab food sometime"
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    reactions:
+        queue action-selector invite-outcome:
+            with:
+                @alex: @alex
+                @jordan: @jordan
+            urgent: true
+        queue action-selector jordan-responds:
+            with:
+                @jordan: @jordan
+                @alex: @alex
+            urgent: true
+
+reserved action-selector invite-outcome:
+    roles:
+        @alex:
+            as: initiator
+        @jordan:
+            as: recipient
+    target in order:
+        invite-accepted:
+            with:
+                @alex: @alex
+                @jordan: @jordan
+        invite-deflected:
+            with:
+                @alex: @alex
+                @jordan: @jordan
+
+reserved action invite-accepted:
+    gloss: 'There is barely a pause. @jordan tilts their head: "I was kind of thinking about that too"'
     roles:
         @alex:
             as: initiator
         @jordan:
             as: recipient
     conditions:
-        @alex.canInviteOut
+        (@jordan.friendship >= 55 && @jordan.romance >= 30)
+        || (@jordan.volition == #PURSUIT && @jordan.friendship >= 45)
+    effects:
+        @jordan.friendship += 14
+        @jordan.romance += 9
 
-action be-vulnerable:
-    gloss: "@alex opens up to @jordan"
+reserved action invite-deflected:
+    gloss: '@jordan looks caught off guard. "Maybe sometime," they say. Not a yes.'
     roles:
         @alex:
             as: initiator
         @jordan:
             as: recipient
-    conditions:
-        @alex.canBeVulnerable
+    effects:
+        @jordan.tension += 11
+        @jordan.friendship -= 2
 
-// ── Jordan's reactions (JS-triggered) ───────────────────────────────────────
 
-reserved action jordan-warms-up:
-    gloss: "@jordan warms up to @alex"
+// ── Jordan's response (action-selector — volition-driven) ───────────────────
+//
+// Tried in order. The first whose conditions match fires. jordan-neutral is
+// the unconditional fallback at the bottom. The PURSUIT/GUARDED branches
+// expose distinctly different reaction repertoires.
+
+reserved action-selector jordan-responds:
     roles:
         @jordan:
             as: initiator
         @alex:
             as: recipient
-    conditions:
-        @jordan.canWarmUp
+    target in order:
+        jordan-pulls-back:
+            with:
+                @jordan: @jordan
+                @alex: @alex
+        jordan-deflects:
+            with:
+                @jordan: @jordan
+                @alex: @alex
+        jordan-flusters:
+            with:
+                @jordan: @jordan
+                @alex: @alex
+        jordan-reciprocates:
+            with:
+                @jordan: @jordan
+                @alex: @alex
+        jordan-tests-alex:
+            with:
+                @jordan: @jordan
+                @alex: @alex
+        jordan-warms-up:
+            with:
+                @jordan: @jordan
+                @alex: @alex
+        jordan-neutral:
+            with:
+                @jordan: @jordan
+                @alex: @alex
 
 reserved action jordan-pulls-back:
-    gloss: "@jordan becomes guarded with @alex"
+    gloss: "@jordan's expression goes careful. They glance at their phone like they just remembered something."
     roles:
         @jordan:
             as: initiator
         @alex:
             as: recipient
     conditions:
-        @jordan.canPullBack
+        @jordan.tension >= 50
+    effects:
+        @jordan.tension += 5
+        @jordan.friendship -= 2
+
+reserved action jordan-deflects:
+    gloss: "@jordan changes the subject — gracefully, but it's a wall going up."
+    roles:
+        @jordan:
+            as: initiator
+        @alex:
+            as: recipient
+    conditions:
+        @jordan.volition == #GUARDED && @jordan.romance >= 20 && @jordan.trust < 45
+    effects:
+        @jordan.tension += 4
+        @jordan.romance -= 2
+
+reserved action jordan-flusters:
+    gloss: '@jordan touches their own hair — small, unconscious. "This isnt as bad as I thought."'
+    roles:
+        @jordan:
+            as: initiator
+        @alex:
+            as: recipient
+    conditions:
+        @jordan.volition == #PURSUIT && @jordan.romance >= 25
+    effects:
+        @jordan.romance += 4
+        @jordan.friendship += 2
 
 reserved action jordan-reciprocates:
-    gloss: "@jordan shows interest in @alex"
+    gloss: "@jordan glances at @alex once, then twice. When they look away there's color in their face."
     roles:
         @jordan:
             as: initiator
         @alex:
             as: recipient
     conditions:
-        @jordan.canReciprocate
+        @jordan.romance >= 45 && @jordan.friendship >= 50
+    effects:
+        @jordan.romance += 5
+        @jordan.trust += 3
+
+reserved action jordan-tests-alex:
+    gloss: "@jordan asks a pointed question — testing whether @alex is paying attention or just performing."
+    roles:
+        @jordan:
+            as: initiator
+        @alex:
+            as: recipient
+    conditions:
+        @jordan.volition == #GUARDED && @jordan.friendship >= 35
+    effects:
+        @jordan.respect += 3
+
+reserved action jordan-warms-up:
+    gloss: "@jordan relaxes — just a little. But @alex notices."
+    roles:
+        @jordan:
+            as: initiator
+        @alex:
+            as: recipient
+    conditions:
+        @jordan.friendship >= 40 && @jordan.tension < 40
+    effects:
+        @jordan.friendship += 3
 
 reserved action jordan-neutral:
-    gloss: "@jordan continues talking with @alex"
+    gloss: "@jordan just nods. The conversation continues."
     roles:
         @jordan:
             as: initiator
