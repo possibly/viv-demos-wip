@@ -98,12 +98,14 @@ export const QUEST_GIVER = {
   id: "questGiver",
   name: "Elder Mira",
   location: "millhaven",
+  discoveryRate: 1.0,
 };
 
 export const RANGER_VOSS = {
   id: "rangerVoss",
   name: "Ranger Voss",
   location: "stonewick",
+  discoveryRate: 1.0,
 };
 
 export const ALL_QUEST_GIVERS = [QUEST_GIVER, RANGER_VOSS];
@@ -113,6 +115,7 @@ export const QUEST_ITEMS = {
     id: "captains_insignia",
     name: "Captain's Insignia",
     dropFrom: "grimspawn_captain",
+    dropChance: 1.0,
   },
 };
 
@@ -188,6 +191,18 @@ export const ZONE_ENEMIES = {
   stonewick:  ["grimspawn_scout"],
   stillwater: ["grimspawn_warrior", "grimspawn_enforcer", "grimspawn_captain", "grimspawn_warlord"],
 };
+
+// Unified discoverable pool per zone: enemies and quest-giver NPCs share the same discovery queue.
+// Each entry carries a discoveryRate so look-around uses identical RNG logic for both types.
+export const ZONE_DISCOVERABLES = Object.fromEntries(
+  ZONES.map(z => [
+    z.id,
+    [
+      ...(ZONE_ENEMIES[z.id] ?? []).map(id => ({ id, type: "enemy", discoveryRate: ENEMY_TEMPLATES[id].discoveryRate })),
+      ...ALL_QUEST_GIVERS.filter(qg => qg.location === z.id).map(qg => ({ id: qg.id, type: "questGiver", discoveryRate: qg.discoveryRate })),
+    ],
+  ])
+);
 
 export const WEAK_LOOT_ITEMS = [
   { name: "Tattered Cloth Hood",     powerLevel: 1, slot: "head" },
@@ -426,9 +441,19 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     const adventurer = state.entities["adventurer"];
     const locationID = adventurer.location;
     const zoneName = ZONES.find(z => z.id === locationID)?.name ?? locationID;
-    const allEnemiesHere = ZONE_ENEMIES[locationID] ?? [];
     const discoveredHere = adventurer.discoveredEnemies[locationID] ?? [];
-    const undiscoveredEnemies = allEnemiesHere.filter(id => !discoveredHere.includes(id));
+
+    // Unified undiscovered pool: enemies and quest-giver NPCs share the same discovery queue
+    const undiscoveredPool = (ZONE_DISCOVERABLES[locationID] ?? []).filter(d => {
+      if (d.type === "enemy") return !discoveredHere.includes(d.id);
+      return !(adventurer.discoveredQuestGivers?.[locationID] ?? []).includes(d.id);
+    });
+
+    // Quest givers already discovered here — used for auto-accept logic below
+    const discoveredQuestGiversHere = ALL_QUEST_GIVERS.filter(qg =>
+      qg.location === locationID &&
+      (adventurer.discoveredQuestGivers?.[locationID] ?? []).includes(qg.id)
+    );
 
     // Update quest state flags read by Viv plan conditions
     if (adventurer.questActive) {
@@ -447,16 +472,6 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       }
     }
 
-    // Check all quest givers in the current zone
-    const undiscoveredQuestGiversHere = ALL_QUEST_GIVERS.filter(qg =>
-      qg.location === locationID &&
-      !(adventurer.discoveredQuestGivers?.[locationID] ?? []).includes(qg.id)
-    );
-    const discoveredQuestGiversHere = ALL_QUEST_GIVERS.filter(qg =>
-      qg.location === locationID &&
-      (adventurer.discoveredQuestGivers?.[locationID] ?? []).includes(qg.id)
-    );
-
     // Auto-queue accept-quest when at a discovered quest giver and not on a quest
     if (!adventurer.questActive && discoveredQuestGiversHere.length > 0) {
       for (const qg of discoveredQuestGiversHere) {
@@ -474,9 +489,8 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
     // Viv's quest-directed selector handles all quest-phase routing; these flags just expose
     // what's possible at the current location and are read as conditions by Viv actions.
-    const hasUndiscoveredQuestGiver = undiscoveredQuestGiversHere.length > 0;
     adventurer.canFight = discoveredHere.length > 0;
-    adventurer.canScout = undiscoveredEnemies.length > 0 || hasUndiscoveredQuestGiver;
+    adventurer.canScout = undiscoveredPool.length > 0;
 
     const events = [];
 
@@ -570,7 +584,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
           const activeQuest = QUESTS.find(q => q.id === adventurer.questId);
           if (activeQuest?.questItem) {
             const questItemDef = QUEST_ITEMS[activeQuest.questItem];
-            if (questItemDef?.dropFrom === enemy.templateId) {
+            if (questItemDef?.dropFrom === enemy.templateId && rng() < (questItemDef.dropChance ?? 1.0)) {
               adventurer.questItemCollected = true;
               events.push({ text: `${adventurer.name} recovers the ${questItemDef.name}!`, type: "loot" });
             }
@@ -613,29 +627,29 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       }
 
     } else if (selectedActionName === "look-around") {
-      if (hasUndiscoveredQuestGiver) {
-        // Discover the first undiscovered quest giver in this zone (always 100%)
-        const questGiverToDiscover = undiscoveredQuestGiversHere[0];
-        if (!adventurer.discoveredQuestGivers[locationID]) adventurer.discoveredQuestGivers[locationID] = [];
-        adventurer.discoveredQuestGivers[locationID].push(questGiverToDiscover.id);
-        events.push({ text: `${adventurer.name} meets ${questGiverToDiscover.name} in ${zoneName}!`, type: "scouting" });
-      } else if (undiscoveredEnemies.length > 0) {
-        // Prioritize the quest target so the adventurer finds it before other enemies in the zone
-        const questTargetUndiscovered = adventurer.questActive &&
-          !adventurer.questEnemyFound &&
-          undiscoveredEnemies.includes(adventurer.questTargetTemplate);
-        const foundId = questTargetUndiscovered
-          ? adventurer.questTargetTemplate
-          : pickRandom(rng, undiscoveredEnemies);
-        const enemy = ENEMY_TEMPLATES[foundId];
-        if (rng() < enemy.discoveryRate) {
-          if (!adventurer.discoveredEnemies[locationID]) adventurer.discoveredEnemies[locationID] = [];
-          adventurer.discoveredEnemies[locationID].push(foundId);
-          const factionId = enemy.faction;
-          const newFaction = !(factionId in adventurer.factionRelationships);
-          if (newFaction) adventurer.factionRelationships[factionId] = initialFactionRep(factionId);
-          const factionNote = newFaction ? ` ${FACTIONS[factionId]?.name ?? factionId} added to known factions.` : "";
-          events.push({ text: `${adventurer.name} spots a level ${enemy.level} ${enemy.name} in ${zoneName}.${factionNote}`, type: "scouting" });
+      if (undiscoveredPool.length > 0) {
+        // When on a quest, bias toward the quest target enemy if it's still undiscovered
+        const questTargetEntry = (adventurer.questActive && !adventurer.questEnemyFound)
+          ? undiscoveredPool.find(d => d.type === "enemy" && d.id === adventurer.questTargetTemplate)
+          : null;
+        const chosen = questTargetEntry ?? pickRandom(rng, undiscoveredPool);
+
+        if (rng() < chosen.discoveryRate) {
+          if (chosen.type === "enemy") {
+            if (!adventurer.discoveredEnemies[locationID]) adventurer.discoveredEnemies[locationID] = [];
+            adventurer.discoveredEnemies[locationID].push(chosen.id);
+            const enemy = ENEMY_TEMPLATES[chosen.id];
+            const factionId = enemy.faction;
+            const newFaction = !(factionId in adventurer.factionRelationships);
+            if (newFaction) adventurer.factionRelationships[factionId] = initialFactionRep(factionId);
+            const factionNote = newFaction ? ` ${FACTIONS[factionId]?.name ?? factionId} added to known factions.` : "";
+            events.push({ text: `${adventurer.name} spots a level ${enemy.level} ${enemy.name} in ${zoneName}.${factionNote}`, type: "scouting" });
+          } else {
+            const questGiver = ALL_QUEST_GIVERS.find(qg => qg.id === chosen.id);
+            if (!adventurer.discoveredQuestGivers[locationID]) adventurer.discoveredQuestGivers[locationID] = [];
+            adventurer.discoveredQuestGivers[locationID].push(chosen.id);
+            events.push({ text: `${adventurer.name} meets ${questGiver.name} in ${zoneName}!`, type: "scouting" });
+          }
         } else {
           events.push({ text: `${adventurer.name} searches ${zoneName} but finds nothing unusual.`, type: "scouting" });
         }
