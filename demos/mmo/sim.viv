@@ -1,16 +1,16 @@
-// MMO Starter World — each tick, the adventurer's activity is chosen by the pick-activity selector.
+// MMO Starter World — each tick, each adventurer's activity is chosen by the pick-activity selector.
 // fight is gated on having discovered enemies in the current zone.
 // look-around requires undiscovered enemies or an undiscovered quest giver, but is suppressed
 // during the quest hunt phase so the adventurer focuses on killing, not further scouting.
 // kill, retreat, and level-up fire immediately as reserved actions on the same timestep as fight.
 // Enemies are spawned as viv item entities and persist on a per-zone stack until killed.
 // accept-quest fires when the adventurer meets a quest giver and is eligible for the next quest.
-// The quest-hunt plan drives the adventurer through finding, killing, returning, and completing a quest.
-// While on a quest the pick-activity selector delegates to quest-directed first:
-//   - travel-to-quest-zone moves the adventurer to the target zone if they aren't already there.
-//   - look-around finds the quest target enemy once the adventurer arrives.
-//   - fight keeps the adventurer fighting the quest target until the kill count is met.
-//   - return-to-quest-giver moves the adventurer back to the quest giver after all kills are done.
+// On accept, the adventurer may put out a zone-wide request-party call (urgent reserved); other
+// eligible players in the zone get respond-to-party (urgent reserved). The first 4 accepters
+// join, forming a party of up to 5. share-quest urgent-fires for joiners without the quest.
+// While in a party, kill credit, quest items, XP (Classic split), money (even, min 1), and
+// loot rolls (attempt-loot triggers loot-roll for each member) are shared.
+// The party disbands when every member is hunt-done; each member then turns in alone.
 
 reserved action wander:
     gloss: "@adventurer wanders into @destination"
@@ -51,6 +51,7 @@ reserved action return-to-quest-giver:
         @adventurer.questActive
         @adventurer.questHuntDone
         !@adventurer.questReadyToComplete
+        !@adventurer.partyActive
     effects:
         @adventurer.location = @destination
 
@@ -81,7 +82,7 @@ reserved action kill:
                 urgent: true
         end
         if @enemy.hasLoot:
-            queue action loot-all:
+            queue action attempt-loot:
                 with:
                     @adventurer: @adventurer
                     @enemy: @enemy
@@ -162,8 +163,8 @@ reserved action spawn-chest:
         @zone:
             as: location
 
-reserved action loot-all:
-    gloss: "@adventurer loots @enemy ({@enemy.lootSummary})"
+reserved action attempt-loot:
+    gloss: "@adventurer attempts to loot @enemy ({@enemy.lootSummary})"
     roles:
         @adventurer:
             as: initiator
@@ -171,6 +172,14 @@ reserved action loot-all:
             as: recipient
     effects:
         @enemy.hasLoot = false
+
+reserved action loot-roll:
+    gloss: "@adventurer rolls {@adventurer.lootRollValue} for @enemy's loot"
+    roles:
+        @adventurer:
+            as: initiator
+        @enemy:
+            as: recipient
 
 reserved action loot-chest-all:
     gloss: "@adventurer loots @chest ({@chest.lootSummary})"
@@ -211,6 +220,43 @@ reserved action accept-quest:
             with:
                 @adventurer: @adventurer
                 @questGiver: @questGiver
+
+reserved action request-party:
+    gloss: "@adventurer puts out a zone-wide call for party members"
+    roles:
+        @adventurer:
+            as: initiator
+
+reserved action respond-to-party:
+    gloss: "@adventurer responds to @leader's party request"
+    roles:
+        @adventurer:
+            as: initiator
+        @leader:
+            as: recipient
+
+reserved action share-quest:
+    gloss: "@sharer shares the quest with @adventurer"
+    roles:
+        @adventurer:
+            as: initiator
+        @sharer:
+            as: recipient
+        @questGiver:
+            as: character, anywhere
+    effects:
+        @adventurer.questActive = true
+    reactions:
+        queue plan quest-hunt:
+            with:
+                @adventurer: @adventurer
+                @questGiver: @questGiver
+
+reserved action disband-party:
+    gloss: "@adventurer's party disbands"
+    roles:
+        @adventurer:
+            as: initiator
 
 plan quest-hunt:
     roles:

@@ -1,12 +1,13 @@
 import { initializeVivRuntime, selectAction, attemptAction, tickPlanner, EntityType } from "../../shared/viv-runtime.js";
-import { runSim, CLASS_DATA, ZONES, ENEMY_TEMPLATES, ZONE_ENEMIES, LEVEL_XP_MIN, LEVEL_CAP, FACTIONS, RACE_LABELS, EQUIPMENT_SLOTS, SLOT_LABELS, QUEST_GIVER, ALL_QUEST_GIVERS, ALL_VENDORS, QUESTS, QUEST_ITEMS, copperToString } from "./sim.mjs";
+import { runSim, CLASS_DATA, ZONES, ENEMY_TEMPLATES, ZONE_ENEMIES, LEVEL_XP_MIN, LEVEL_CAP, FACTIONS, RACE_LABELS, EQUIPMENT_SLOTS, SLOT_LABELS, QUEST_GIVER, ALL_QUEST_GIVERS, ALL_VENDORS, QUESTS, QUEST_ITEMS, copperToString, PLAYER_IDS } from "./sim.mjs";
 
 const runtime = { initializeVivRuntime, selectAction, attemptAction, tickPlanner, EntityType };
 let cachedBundle = null;
 
 let simData = null;
 let currentTick = 0;
-let currentDisplayChar = null;
+let currentDisplayChars = null;
+let modalCharId = null;
 
 const statusEl    = document.getElementById("status");
 const simViewEl   = document.getElementById("sim-view");
@@ -17,7 +18,7 @@ const btnRun      = document.getElementById("btn-run");
 const eventsEl    = document.getElementById("events");
 const seedInput   = document.getElementById("seed-input");
 const stepsInput  = document.getElementById("steps-input");
-const charCardEl  = document.getElementById("char-card");
+const charCardsEl = document.getElementById("char-cards");
 const zonemapEl   = document.getElementById("zonemap");
 const charModalEl = document.getElementById("char-modal");
 const modalBodyEl = document.getElementById("modal-body");
@@ -41,12 +42,20 @@ function questStatusText(char) {
   if (!char.questEnemyFound) phase = "Scouting…";
   else if (done < needed) phase = `Slain: ${done} / ${needed}`;
   else if (quest.questItem && !char.questItemCollected) phase = `Collect: ${QUEST_ITEMS[quest.questItem]?.name ?? "quest item"}`;
+  else if (char.partyActive) phase = `Waiting for party`;
   else if (!char.questReadyToComplete) phase = `Return to ${questGiver.name}`;
   else phase = "Ready to turn in!";
   return { name: quest.name, phase };
 }
 
-function renderCharCard(char) {
+function partyTagHTML(char) {
+  if (!char.partyActive) return "";
+  const size = (char.partyMembers ?? []).length;
+  const isLeader = char.partyLeaderId === char.id;
+  return `<div class="char-party" title="${isLeader ? "Party leader" : "Party member"}">⚑ Party ${size}/5${isLeader ? " (leader)" : ""}</div>`;
+}
+
+function renderCharCard(char, isActiveTick) {
   const cd = CLASS_DATA[char.class];
   const level = char.level ?? 1;
   const xp = char.xp ?? 0;
@@ -60,10 +69,13 @@ function renderCharCard(char) {
 
   const copper = char.copper ?? 0;
   const copperHTML = copper > 0
-    ? `<div class="char-copper" style="color:#b89c5a;font-size:0.78rem">&#x1F4B0; ${copperToString(copper)}</div>`
+    ? `<div class="char-copper">&#x1F4B0; ${copperToString(copper)}</div>`
     : "";
 
-  charCardEl.innerHTML = `
+  const el = document.createElement("div");
+  el.className = "char-card";
+  el.dataset.charId = char.id;
+  el.innerHTML = `
     <div class="char-portrait" style="border-color: ${cd.color}">
       <span class="char-icon">${cd.icon}</span>
     </div>
@@ -77,7 +89,24 @@ function renderCharCard(char) {
       <div class="char-level">Level ${level} · ${xpText}</div>
       ${copperHTML}
       ${questHTML}
+      ${partyTagHTML(char)}
     </div>`;
+  return el;
+}
+
+function renderCharCards(charsByPid) {
+  charCardsEl.innerHTML = "";
+  for (const pid of PLAYER_IDS) {
+    const char = charsByPid[pid];
+    if (!char) continue;
+    const card = renderCharCard(char);
+    card.addEventListener("click", () => {
+      modalCharId = pid;
+      renderModal(charsByPid[pid]);
+      charModalEl.hidden = false;
+    });
+    charCardsEl.appendChild(card);
+  }
 }
 
 function renderModal(char) {
@@ -137,6 +166,20 @@ function renderModal(char) {
       </tbody></table>
     </div>` : "";
 
+  const partySectionHTML = char.partyActive ? (() => {
+    const members = (char.partyMembers ?? []).map(pid => {
+      const m = currentDisplayChars?.[pid];
+      return m ? `${m.name}${pid === char.partyLeaderId ? " (leader)" : ""}` : pid;
+    }).join(", ");
+    return `<div class="modal-section">
+      <div class="modal-section-title">Party</div>
+      <table class="modal-table"><tbody>
+        <tr><td class="col-label">Members</td><td>${members}</td></tr>
+        <tr><td class="col-label">Size</td><td>${(char.partyMembers ?? []).length} / 5</td></tr>
+      </tbody></table>
+    </div>`;
+  })() : "";
+
   const knownFactions = Object.entries(char.factionRelationships ?? {});
   const factionRows = knownFactions.length === 0
     ? `<tr><td colspan="3" class="col-muted" style="font-style:italic">None discovered yet</td></tr>`
@@ -172,6 +215,7 @@ function renderModal(char) {
       </table>
     </div>
     ${inventorySectionHTML}
+    ${partySectionHTML}
     ${questSectionHTML}
     <div class="modal-section">
       <div class="modal-section-title">Known Factions</div>
@@ -179,16 +223,34 @@ function renderModal(char) {
     </div>`;
 }
 
-function renderZonemap(currentLocationID, discoveredNPCs) {
+function renderZonemap(charsByPid) {
   zonemapEl.innerHTML = "";
+  // Merge all discoveries for the zonemap so the player can see everyone's progress.
+  const mergedDiscoveries = {};
+  for (const pid of Object.keys(charsByPid)) {
+    const c = charsByPid[pid];
+    for (const [zoneId, ids] of Object.entries(c.discoveredNPCs ?? {})) {
+      if (!mergedDiscoveries[zoneId]) mergedDiscoveries[zoneId] = new Set();
+      ids.forEach(id => mergedDiscoveries[zoneId].add(id));
+    }
+  }
+
+  const charsByZone = {};
+  for (const pid of PLAYER_IDS) {
+    const c = charsByPid[pid];
+    if (!c) continue;
+    (charsByZone[c.location] ??= []).push(c);
+  }
+
   for (const z of ZONES) {
     const el = document.createElement("div");
     const isDanger = !!ZONE_ENEMIES[z.id];
+    const presentChars = charsByZone[z.id] ?? [];
     el.className = "zone-node" +
-      (z.id === currentLocationID ? " active" : "") +
+      (presentChars.length > 0 ? " active" : "") +
       (isDanger ? " danger" : "");
 
-    const knownHere = discoveredNPCs?.[z.id] ?? [];
+    const knownHere = [...(mergedDiscoveries[z.id] ?? [])];
 
     const discovered = knownHere
       .map(id => ENEMY_TEMPLATES[id])
@@ -209,22 +271,28 @@ function renderZonemap(currentLocationID, discoveredNPCs) {
       ? `<div class="zone-vendor">${knownVendors.map(v => `<span class="zone-npc" style="color:#7eb8a8">&#x1F6D2; ${v.name}</span>`).join("")}</div>`
       : "";
 
-    el.innerHTML = `<span class="zone-name">${z.name}</span><span class="zone-desc">${z.desc}</span>${enemyHTML}${giverHTML}${vendorHTML}`;
+    const presentHTML = presentChars.length > 0
+      ? `<div class="zone-present">${presentChars.map(c => `<span class="zone-char" style="color:${CLASS_DATA[c.class].color}">${CLASS_DATA[c.class].icon} ${c.name}</span>`).join("")}</div>`
+      : "";
+
+    el.innerHTML = `<span class="zone-name">${z.name}</span><span class="zone-desc">${z.desc}</span>${presentHTML}${enemyHTML}${giverHTML}${vendorHTML}`;
     zonemapEl.appendChild(el);
   }
 }
 
 function render() {
   const tick = simData.ticks[currentTick];
-  currentDisplayChar = tick.character;
+  currentDisplayChars = tick.characters;
 
   tickLabelEl.textContent = `Tick ${currentTick + 1} / ${simData.ticks.length}`;
   btnPrev.disabled = currentTick === 0;
   btnNext.disabled = currentTick === simData.ticks.length - 1;
 
-  renderCharCard(tick.character);
-  renderZonemap(tick.character.location, tick.character.discoveredNPCs);
-  if (!charModalEl.hidden) renderModal(tick.character);
+  renderCharCards(tick.characters);
+  renderZonemap(tick.characters);
+  if (!charModalEl.hidden && modalCharId && tick.characters[modalCharId]) {
+    renderModal(tick.characters[modalCharId]);
+  }
 
   eventsEl.innerHTML = "";
   if (tick.events.length === 0) {
@@ -236,7 +304,11 @@ function render() {
     for (const e of tick.events) {
       const el = document.createElement("div");
       el.className = "event-entry" + (e.type ? " " + e.type : "");
-      el.textContent = e.text;
+      const whoChar = e.who ? tick.characters[e.who] : null;
+      const whoLabel = whoChar
+        ? `<span class="event-who" style="color:${CLASS_DATA[whoChar.class].color}">${whoChar.name}:</span> `
+        : "";
+      el.innerHTML = `${whoLabel}${e.text}`;
       eventsEl.appendChild(el);
     }
   }
@@ -260,8 +332,8 @@ async function runSimulation() {
     if (!cachedBundle) cachedBundle = await fetch("./bundle.json").then((r) => r.json());
     simData = await runSim(runtime, cachedBundle, seedStr, tickCount);
     currentTick = 0;
-    currentDisplayChar = simData.character;
-    renderCharCard(simData.character);
+    currentDisplayChars = simData.characters;
+    renderCharCards(simData.characters);
     simViewEl.hidden = false;
     render();
     setStatus("");
@@ -273,15 +345,9 @@ async function runSimulation() {
   }
 }
 
-charCardEl.addEventListener("click", () => {
-  if (!currentDisplayChar) return;
-  renderModal(currentDisplayChar);
-  charModalEl.hidden = false;
-});
-
-document.getElementById("modal-backdrop").addEventListener("click", () => { charModalEl.hidden = true; });
-document.getElementById("modal-close").addEventListener("click", () => { charModalEl.hidden = true; });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !charModalEl.hidden) charModalEl.hidden = true; });
+document.getElementById("modal-backdrop").addEventListener("click", () => { charModalEl.hidden = true; modalCharId = null; });
+document.getElementById("modal-close").addEventListener("click", () => { charModalEl.hidden = true; modalCharId = null; });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !charModalEl.hidden) { charModalEl.hidden = true; modalCharId = null; } });
 
 btnRun.addEventListener("click", runSimulation);
 btnPrev.addEventListener("click", () => { if (currentTick > 0) { currentTick--; render(); } });

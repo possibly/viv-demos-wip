@@ -11,6 +11,7 @@ export {
 } from "./core/data.mjs";
 export { questXpReward, pickQuestForAdventurer } from "./core/quests.mjs";
 export { itemSellPrice, copperToString } from "./core/items.mjs";
+export { PLAYER_IDS } from "./core/character.mjs";
 
 import {
   ZONES, ZONE_MAP, LEVEL_XP_MIN, LEVEL_CAP,
@@ -24,8 +25,12 @@ import {
 import { questXpReward, pickQuestForAdventurer, initialFactionRep } from "./core/quests.mjs";
 import { getAvgEquipmentPower, combatWinChance, generateLoot, formatLootSummary } from "./core/combat.mjs";
 import { itemSellPrice, copperToString, spawnChest } from "./core/items.mjs";
-import { getLevel, buildInitialState } from "./core/character.mjs";
+import { getLevel, buildInitialState, PLAYER_IDS } from "./core/character.mjs";
 import { mulberry32, hashSeed, makeUUID, pickRandom, setIn } from "./core/utils.mjs";
+import {
+  PARTY_MAX_SIZE, PARTY_REQUEST_CHANCE, PARTY_RESPOND_CHANCE,
+  splitXp, splitCopper, eligibleForPartyOnQuest,
+} from "./core/party.mjs";
 
 export async function runSim({ initializeVivRuntime, selectAction, attemptAction, tickPlanner, EntityType }, bundle, seedStr, tickCount) {
   const rng = mulberry32(hashSeed(seedStr));
@@ -88,6 +93,9 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
   initializeVivRuntime({ contentBundle: bundle, adapter });
 
+  const xpCap = LEVEL_XP_MIN[LEVEL_CAP - 1];
+  const chestConfig = CHEST_CONFIGS[0];
+
   // --- Tick-loop helpers ---
 
   async function attempt(actionName, initiatorID, precastBindings, suppressConditions) {
@@ -102,87 +110,292 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     return state.actions.filter(id => !before.has(id));
   }
 
-  // Drains the urgent-action queue, calling onNew(ids) for each batch until empty.
-  async function drainUrgent(onNew) {
+  async function drainUrgent(playerId, onNew) {
     while (true) {
-      const newIds = await select({ initiatorID: "adventurer", urgentOnly: true });
+      const newIds = await select({ initiatorID: playerId, urgentOnly: true });
       if (newIds.length === 0) break;
-      onNew(newIds);
+      await onNew(newIds);
     }
   }
 
-  // Equips each item from itemIds if it beats the currently equipped slot power.
-  async function equipFromList(adventurer, itemIds, events) {
+  function pushEvent(events, who, text, type) {
+    events.push({ who, text, type });
+  }
+
+  async function equipFromList(player, itemIds, events) {
     for (const itemId of itemIds) {
       const item = state.entities[itemId];
-      const currentPower = adventurer.equipment[item.slot]?.powerLevel ?? 0;
+      const currentPower = player.equipment[item.slot]?.powerLevel ?? 0;
       if (item.powerLevel > currentPower) {
-        const newIds = await attempt("equip-item", "adventurer", { adventurer: ["adventurer"], item: [itemId] }, true);
+        player.shouldEquipLoot = true;
+        const newIds = await attempt("equip-item", player.id, { adventurer: [player.id], item: [itemId] }, true);
         newIds.forEach(id => {
           const a = state.entities[id];
-          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "loot" });
+          pushEvent(events, player.id, a.report ?? a.gloss ?? "(action)", "loot");
         });
-        const displaced = adventurer.equipment[item.slot];
-        if (displaced) adventurer.inventory = [...adventurer.inventory, { ...displaced, slot: item.slot }];
-        adventurer.equipment[item.slot] = { name: item.name, powerLevel: item.powerLevel };
-        adventurer.inventory = adventurer.inventory.filter(i => i.id !== itemId);
+        const displaced = player.equipment[item.slot];
+        if (displaced) player.inventory = [...player.inventory, { ...displaced, slot: item.slot }];
+        player.equipment[item.slot] = { name: item.name, powerLevel: item.powerLevel };
+        player.inventory = player.inventory.filter(i => i.id !== itemId);
       }
     }
   }
 
-  // --- Sim loop ---
+  function partyMembersOf(player) {
+    if (!player.partyActive) return [player];
+    return (player.partyMembers ?? []).map(id => state.entities[id]).filter(Boolean);
+  }
 
-  const ticks = [];
-  const initialChar = structuredClone(state.entities["adventurer"]);
-  const xpCap = LEVEL_XP_MIN[LEVEL_CAP - 1];
-  const chestConfig = CHEST_CONFIGS[0];
+  function partyMembersInZone(player, zoneId) {
+    return partyMembersOf(player).filter(m => m.location === zoneId);
+  }
 
-  for (let t = 0; t < tickCount; t++) {
-    if (!state.chestState.activeChestId && t >= state.chestState.cooldownUntilTick) {
-      if (rng() < chestConfig.spawnChance) {
-        const { chestId, zoneId } = spawnChest(chestConfig, EntityType, rng, state);
-        await attempt("spawn-chest", "world", { world: ["world"], chest: [chestId], zone: [zoneId] }, true);
-      }
+  function updateAllPartyAllHuntDone(partyMembers) {
+    const allDone = partyMembers.every(m => m.questActive && (m.questHuntDone ?? false));
+    for (const m of partyMembers) m.partyAllHuntDone = allDone;
+    return allDone;
+  }
+
+  // --- Party formation: leader puts out request, eligible others respond ---
+
+  async function tryFormParty(leader, quest, events) {
+    if (rng() >= PARTY_REQUEST_CHANCE) return;
+
+    const requestIds = await attempt("request-party", leader.id, { adventurer: [leader.id] }, true);
+    requestIds.forEach(id => {
+      const a = state.entities[id];
+      pushEvent(events, leader.id, a.report ?? a.gloss ?? "(action)", "party");
+    });
+
+    const candidates = state.players
+      .map(pid => state.entities[pid])
+      .filter(p => eligibleForPartyOnQuest(p, leader, quest));
+
+    if (candidates.length === 0) {
+      pushEvent(events, leader.id, `${leader.name}'s call goes unanswered — no eligible party members nearby.`, "party");
+      return;
     }
 
-    const adventurer = state.entities["adventurer"];
+    const joiners = [];
+    for (const candidate of candidates) {
+      if (joiners.length >= PARTY_MAX_SIZE - 1) break;
+      const respondIds = await attempt("respond-to-party", candidate.id, { adventurer: [candidate.id], leader: [leader.id] }, true);
+      const accept = rng() < PARTY_RESPOND_CHANCE;
+      respondIds.forEach(id => {
+        const a = state.entities[id];
+        const verbose = `${candidate.name} ${accept ? "accepts" : "declines"} ${leader.name}'s party invitation.`;
+        pushEvent(events, candidate.id, verbose, "party");
+      });
+      if (accept) joiners.push(candidate);
+    }
+
+    if (joiners.length === 0) {
+      pushEvent(events, leader.id, `${leader.name}'s party request finds no takers this time.`, "party");
+      return;
+    }
+
+    const partyId = makeUUID(rng);
+    const members = [leader, ...joiners];
+    const memberIds = members.map(m => m.id);
+    for (const m of members) {
+      m.partyId = partyId;
+      m.partyActive = true;
+      m.partyLeaderId = leader.id;
+      m.partyMembers = memberIds;
+      m.partyQuestId = quest.id;
+      m.partyAllHuntDone = false;
+    }
+    pushEvent(events, leader.id, `Party formed: ${members.map(m => m.name).join(", ")} (${members.length}/${PARTY_MAX_SIZE}).`, "party");
+
+    // For each member without the quest, share it via urgent share-quest
+    for (const m of joiners) {
+      if (m.questActive && m.questId === quest.id) continue;
+      if (m.questActive) {
+        // Already on a different quest — abandon it silently to take the party quest
+        m.questActive = false;
+      }
+      const shareIds = await attempt("share-quest", m.id, { adventurer: [m.id], sharer: [leader.id], questGiver: [leader.questGiverId] }, true);
+      shareIds.forEach(id => {
+        const a = state.entities[id];
+        pushEvent(events, m.id, a.report ?? a.gloss ?? "(action)", "party");
+      });
+      m.questId = quest.id;
+      m.questGiverId = leader.questGiverId;
+      m.questGiverLocation = leader.questGiverLocation;
+      m.questTargetTemplate = quest.targetTemplate;
+      m.questTargetZone = quest.targetZone;
+      m.questKillsNeeded = quest.targetCount;
+      m.questKillsDone = leader.questKillsDone ?? 0;
+      m.questItemCollected = leader.questItemCollected ?? false;
+      m.questXpReward = questXpReward(quest.level);
+      m.questEnemyFound = (m.discoveredNPCs[quest.targetZone] ?? []).includes(quest.targetTemplate);
+      m.questHuntDone = false;
+      m.questReadyToComplete = false;
+    }
+  }
+
+  // --- Shared quest credit & loot resolution within a party ---
+
+  function applyKillSharedCredit(killer, enemy, events) {
+    const members = partyMembersOf(killer);
+    for (const m of members) {
+      if (!m.questActive || m.questId !== killer.questId) continue;
+      if (enemy.templateId === m.questTargetTemplate && (m.questKillsDone ?? 0) < (m.questKillsNeeded ?? 0)) {
+        m.questKillsDone = (m.questKillsDone ?? 0) + 1;
+      }
+    }
+    if (members.length > 1) {
+      pushEvent(events, killer.id, `Party shares the kill (${members.map(m => m.name).join(", ")}).`, "party");
+    }
+  }
+
+  function applyXpAwardForKill(killer, enemy, events) {
+    const zone = killer.location;
+    const sharers = partyMembersInZone(killer, zone);
+    const baseXp = enemy.xpReward ?? 0;
+    if (sharers.length <= 1) {
+      const xpAward = Math.min(baseXp, Math.max(0, xpCap - killer.xp));
+      killer.pendingXpReward = xpAward;
+      killer.pendingLevel = Math.min(getLevel(killer.xp + xpAward), LEVEL_CAP);
+      return { primaryXp: xpAward, sharers: [killer] };
+    }
+    const levels = sharers.map(m => m.level ?? 1);
+    const shares = splitXp(baseXp, levels);
+    let primaryXp = 0;
+    sharers.forEach((m, i) => {
+      const cap = Math.max(0, xpCap - m.xp);
+      const award = Math.min(shares[i], cap);
+      if (m.id === killer.id) {
+        m.pendingXpReward = award;
+        m.pendingLevel = Math.min(getLevel(m.xp + award), LEVEL_CAP);
+        primaryXp = award;
+      } else {
+        // Award XP directly to other party members (no Viv `kill` action fires for them)
+        m.xp = Math.min(m.xp + award, xpCap);
+        const newLevel = Math.min(getLevel(m.xp), LEVEL_CAP);
+        if (newLevel > (m.level ?? 1)) {
+          m.level = newLevel;
+          pushEvent(events, m.id, `${m.name} reaches level ${newLevel}!`, "victory");
+        }
+        pushEvent(events, m.id, `${m.name} gains ${award} XP (party share).`, "victory");
+      }
+    });
+    return { primaryXp, sharers };
+  }
+
+  function applyQuestItemDrop(killer, enemy, events) {
+    if (!killer.questActive) return;
+    const activeQuest = QUESTS.find(q => q.id === killer.questId);
+    if (!activeQuest?.questItem) return;
+    const questItemDef = QUEST_ITEMS[activeQuest.questItem];
+    if (!questItemDef) return;
+    if (questItemDef.dropFrom !== enemy.templateId) return;
+    if (rng() >= (questItemDef.dropChance ?? 1.0)) return;
+    const members = partyMembersOf(killer);
+    let recipients = 0;
+    for (const m of members) {
+      if (m.questActive && m.questId === killer.questId && !m.questItemCollected) {
+        m.questItemCollected = true;
+        recipients++;
+      }
+    }
+    if (recipients > 0) {
+      const who = members.length > 1 ? "The party" : killer.name;
+      pushEvent(events, killer.id, `${who} recovers the ${questItemDef.name}!`, "loot");
+    }
+  }
+
+  async function resolveAttemptLoot(looter, enemy, attemptLootIds, events) {
+    attemptLootIds.forEach(id => {
+      const a = state.entities[id];
+      pushEvent(events, looter.id, a.report ?? a.gloss ?? "(action)", "loot");
+    });
+
+    const sharers = partyMembersInZone(looter, looter.location);
+    const items = (enemy.lootItems ?? []).map(id => state.entities[id]).filter(Boolean);
+    const copper = enemy.lootCopper ?? 0;
+
+    if (sharers.length <= 1) {
+      // Solo loot — everything to the looter
+      for (const item of items) {
+        looter.inventory = [...(looter.inventory ?? []), item];
+      }
+      if (copper > 0) looter.copper = (looter.copper ?? 0) + copper;
+      await equipFromList(looter, items.map(it => it.id), events);
+      return;
+    }
+
+    // Party loot — roll for each item, split copper with min 1
+    for (const item of items) {
+      const rolls = [];
+      for (const m of sharers) {
+        m.lootRollValue = 1 + Math.floor(rng() * 100);
+        const rollIds = await attempt("loot-roll", m.id, { adventurer: [m.id], enemy: [enemy.id] }, true);
+        rollIds.forEach(id => {
+          const a = state.entities[id];
+          pushEvent(events, m.id, a.report ?? a.gloss ?? "(action)", "loot");
+        });
+        rolls.push({ member: m, value: m.lootRollValue });
+      }
+      rolls.sort((a, b) => b.value - a.value);
+      const winner = rolls[0].member;
+      winner.inventory = [...(winner.inventory ?? []), item];
+      pushEvent(events, winner.id, `${winner.name} wins ${item.name} (roll ${rolls[0].value}).`, "loot");
+      await equipFromList(winner, [item.id], events);
+    }
+
+    if (copper > 0 || sharers.length > 1) {
+      const each = splitCopper(copper, sharers.length);
+      for (const m of sharers) m.copper = (m.copper ?? 0) + each;
+      pushEvent(events, looter.id, `${copperToString(copper)} split: ${each}c to each of ${sharers.length} party member${sharers.length > 1 ? "s" : ""}.`, "loot");
+    }
+  }
+
+  async function maybeDisbandParty(player, events) {
+    if (!player.partyActive) return;
+    const members = partyMembersOf(player);
+    const allDone = members.every(m => m.questActive && (m.questHuntDone ?? false));
+    for (const m of members) m.partyAllHuntDone = allDone;
+    if (!allDone) return;
+
+    pushEvent(events, player.id, `Party hunt complete — ${members.map(m => m.name).join(", ")} disband to turn in alone.`, "party");
+    for (const m of members) {
+      const disbandIds = await attempt("disband-party", m.id, { adventurer: [m.id] }, true);
+      disbandIds.forEach(id => {
+        const a = state.entities[id];
+        pushEvent(events, m.id, a.report ?? a.gloss ?? "(action)", "party");
+      });
+      m.partyId = null;
+      m.partyActive = false;
+      m.partyMembers = [];
+      m.partyLeaderId = null;
+      m.partyQuestId = null;
+      m.partyAllHuntDone = false;
+    }
+  }
+
+  // --- Per-player tick processing ---
+
+  // Phase 1: update flags, auto-accept quest, optionally fire party-request — same tick.
+  async function preActionUpdates(playerId, events) {
+    const adventurer = state.entities[playerId];
     const locationID = adventurer.location;
-    const zoneName = ZONE_MAP.get(locationID)?.name ?? locationID;
     const discoveredHere = adventurer.discoveredNPCs[locationID] ?? [];
 
-    const undiscoveredPool = (ZONE_DISCOVERABLES[locationID] ?? []).filter(d => !discoveredHere.includes(d.id));
-
-    if (state.chestState.activeChestId) {
-      const chest = state.entities[state.chestState.activeChestId];
-      if (chest?.location === locationID && !discoveredHere.includes(chest.id)) {
-        undiscoveredPool.push({ id: chest.id, discoveryRate: chestConfig.discoveryRate });
-      }
-    }
-
-    // Quest givers already discovered here — used for auto-accept logic below
-    const discoveredQuestGiversHere = (QUEST_GIVERS_BY_ZONE[locationID] ?? []).filter(qg => discoveredHere.includes(qg.id));
-
-    // Vendors already discovered here — used for buy/sell flag computation
-    const discoveredVendorsHere = (VENDORS_BY_ZONE[locationID] ?? []).filter(v => discoveredHere.includes(v.id));
-
-    // Update quest state flags read by Viv plan conditions
     if (adventurer.questActive) {
       adventurer.questEnemyFound = (adventurer.discoveredNPCs[adventurer.questTargetZone] ?? []).includes(adventurer.questTargetTemplate);
       const killsDone = (adventurer.questKillsDone ?? 0) >= (adventurer.questKillsNeeded ?? 1);
       const activeQuest = QUESTS.find(q => q.id === adventurer.questId);
       const itemDone = !activeQuest?.questItem || adventurer.questItemCollected;
       adventurer.questHuntDone = killsDone && itemDone;
-      // Use the stored questGiverLocation set at accept time (works for any quest giver)
-      adventurer.questReadyToComplete = adventurer.questHuntDone && locationID === adventurer.questGiverLocation;
-
-      // Precompute pendingLevel for complete-quest's level-up reaction
+      adventurer.questReadyToComplete = adventurer.questHuntDone && locationID === adventurer.questGiverLocation && !adventurer.partyActive;
       if (adventurer.questReadyToComplete) {
         const newXp = Math.min(adventurer.xp + (adventurer.questXpReward ?? 0), xpCap);
         adventurer.pendingLevel = Math.min(getLevel(newXp), LEVEL_CAP);
       }
     }
 
-    // Auto-queue accept-quest when at a discovered quest giver and not on a quest
+    const discoveredQuestGiversHere = (QUEST_GIVERS_BY_ZONE[locationID] ?? []).filter(qg => discoveredHere.includes(qg.id));
     if (!adventurer.questActive && discoveredQuestGiversHere.length > 0) {
       for (const qg of discoveredQuestGiversHere) {
         const nextQuest = pickQuestForAdventurer(adventurer, qg.id);
@@ -197,7 +410,53 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       }
     }
 
-    // These flags expose what's possible at the current location and are read as conditions by Viv actions.
+    if (adventurer.pendingAcceptQuest) {
+      adventurer.pendingAcceptQuest = false;
+      const quest = QUESTS.find(q => q.id === adventurer.pendingQuestId);
+      const activeQuestGiverId = adventurer.pendingAcceptQuestGiverId ?? QUEST_GIVER.id;
+      const newAcceptIDs = await attempt("accept-quest", adventurer.id, { adventurer: [adventurer.id], questGiver: [activeQuestGiverId] });
+      if (newAcceptIDs.length > 0 && quest) {
+        adventurer.questId = quest.id;
+        adventurer.questGiverId = activeQuestGiverId;
+        adventurer.questTargetTemplate = quest.targetTemplate;
+        adventurer.questTargetZone = quest.targetZone;
+        adventurer.questKillsNeeded = quest.targetCount;
+        adventurer.questKillsDone = 0;
+        adventurer.questItemCollected = false;
+        adventurer.questXpReward = questXpReward(quest.level);
+        adventurer.questEnemyFound = (adventurer.discoveredNPCs[quest.targetZone] ?? []).includes(quest.targetTemplate);
+        adventurer.questHuntDone = false;
+        adventurer.questReadyToComplete = false;
+        newAcceptIDs.forEach(id => {
+          const a = state.entities[id];
+          pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "quest");
+        });
+        pushEvent(events, adventurer.id, `Quest: ${quest.description}`, "quest");
+
+        if (!adventurer.partyActive && state.players.length > 1) {
+          await tryFormParty(adventurer, quest, events);
+        }
+      }
+    }
+  }
+
+  async function processPlayerTick(playerId, t, events) {
+    const adventurer = state.entities[playerId];
+    const locationID = adventurer.location;
+    const zoneName = ZONE_MAP.get(locationID)?.name ?? locationID;
+    const discoveredHere = adventurer.discoveredNPCs[locationID] ?? [];
+
+    const undiscoveredPool = (ZONE_DISCOVERABLES[locationID] ?? []).filter(d => !discoveredHere.includes(d.id));
+
+    if (state.chestState.activeChestId) {
+      const chest = state.entities[state.chestState.activeChestId];
+      if (chest?.location === locationID && !discoveredHere.includes(chest.id)) {
+        undiscoveredPool.push({ id: chest.id, discoveryRate: chestConfig.discoveryRate });
+      }
+    }
+
+    const discoveredVendorsHere = (VENDORS_BY_ZONE[locationID] ?? []).filter(v => discoveredHere.includes(v.id));
+
     adventurer.canFight = discoveredHere.some(id => id in ENEMY_TEMPLATES);
     adventurer.canScout = undiscoveredPool.length > 0;
 
@@ -215,38 +474,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     }
     adventurer.canBuyItem = buyableCandidates.length > 0;
 
-    const events = [];
-
-    if (adventurer.pendingAcceptQuest) {
-      adventurer.pendingAcceptQuest = false;
-      const quest = QUESTS.find(q => q.id === adventurer.pendingQuestId);
-      const activeQuestGiverId = adventurer.pendingAcceptQuestGiverId ?? QUEST_GIVER.id;
-      const newAcceptIDs = await attempt("accept-quest", "adventurer", { adventurer: ["adventurer"], questGiver: [activeQuestGiverId] });
-      if (newAcceptIDs.length > 0 && quest) {
-        adventurer.questId = quest.id;
-        adventurer.questGiverId = activeQuestGiverId;
-        adventurer.questTargetTemplate = quest.targetTemplate;
-        adventurer.questTargetZone = quest.targetZone;
-        adventurer.questKillsNeeded = quest.targetCount;
-        adventurer.questKillsDone = 0;
-        adventurer.questItemCollected = false;
-        adventurer.questXpReward = questXpReward(quest.level);
-        adventurer.questEnemyFound = (adventurer.discoveredNPCs[quest.targetZone] ?? []).includes(quest.targetTemplate);
-        adventurer.questHuntDone = false;
-        adventurer.questReadyToComplete = false;
-        newAcceptIDs.forEach(id => {
-          const a = state.entities[id];
-          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "quest" });
-        });
-        events.push({ text: `Quest: ${quest.description}`, type: "quest" });
-      }
-    }
-
-    // Advance the quest plan (no-op when no plan is queued)
-    await tickPlanner();
-
-    // Viv's pick-activity selector drives all routing: quest-directed (in order) → free-roaming
-    const newActionIDs = await select({ initiatorID: "adventurer" });
+    const newActionIDs = await select({ initiatorID: adventurer.id });
     const selectedActionName = newActionIDs.length > 0 ? state.entities[newActionIDs[0]].name : null;
 
     if (selectedActionName === "fight") {
@@ -263,12 +491,11 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       const winChance = combatWinChance(adventurer.level, avgPower, enemy.level, enemy.powerLevel);
       const playerWins = rng() < winChance;
 
-      adventurer.pendingXpReward = Math.min(enemy.xpReward, Math.max(0, xpCap - adventurer.xp));
-      adventurer.pendingLevel = Math.min(getLevel(adventurer.xp + adventurer.pendingXpReward), LEVEL_CAP);
-
-      const combatBindings = { adventurer: ["adventurer"], enemy: [enemyId] };
+      const combatBindings = { adventurer: [adventurer.id], enemy: [enemyId] };
 
       if (playerWins) {
+        applyXpAwardForKill(adventurer, enemy, events);
+
         const loot = generateLoot(rng, enemy);
         const lootItemEntities = loot.items.map(it => {
           const id = makeUUID(rng);
@@ -281,48 +508,31 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         enemy.lootSummary = formatLootSummary(lootItemEntities, loot.copper);
         enemy.hasLoot = lootItemEntities.length > 0 || loot.copper > 0;
 
-        const killNewIDs = await attempt("kill", "adventurer", combatBindings, true);
+        const killNewIDs = await attempt("kill", adventurer.id, combatBindings, true);
         killNewIDs.forEach(id => {
           const a = state.entities[id];
-          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
+          pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "victory");
         });
 
-        if (adventurer.questActive && enemy.templateId === templateId && templateId === adventurer.questTargetTemplate) {
-          adventurer.questKillsDone = (adventurer.questKillsDone ?? 0) + 1;
-        }
+        applyKillSharedCredit(adventurer, enemy, events);
+        applyQuestItemDrop(adventurer, enemy, events);
 
-        if (adventurer.questActive && !adventurer.questItemCollected) {
-          const activeQuest = QUESTS.find(q => q.id === adventurer.questId);
-          if (activeQuest?.questItem) {
-            const questItemDef = QUEST_ITEMS[activeQuest.questItem];
-            if (questItemDef?.dropFrom === enemy.templateId && rng() < (questItemDef.dropChance ?? 1.0)) {
-              adventurer.questItemCollected = true;
-              events.push({ text: `${adventurer.name} recovers the ${questItemDef.name}!`, type: "loot" });
+        await drainUrgent(adventurer.id, async (newIds) => {
+          for (const id of newIds) {
+            const a = state.entities[id];
+            if (a.name === "attempt-loot") {
+              await resolveAttemptLoot(adventurer, enemy, [id], events);
+            } else {
+              pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "victory");
             }
           }
-        }
-
-        await drainUrgent(newIds => {
-          newIds.forEach(id => {
-            const a = state.entities[id];
-            const evType = a.name === "loot-all" ? "loot" : "victory";
-            events.push({ text: a.report ?? a.gloss ?? "(action)", type: evType });
-            if (a.name === "loot-all") {
-              for (const itemId of enemy.lootItems) {
-                adventurer.inventory = [...(adventurer.inventory ?? []), state.entities[itemId]];
-              }
-              adventurer.copper = (adventurer.copper ?? 0) + (enemy.lootCopper ?? 0);
-            }
-          });
         });
 
-        await equipFromList(adventurer, enemy.lootItems, events);
-
       } else {
-        const retreatNewIDs = await attempt("retreat", "adventurer", combatBindings, true);
+        const retreatNewIDs = await attempt("retreat", adventurer.id, combatBindings, true);
         retreatNewIDs.forEach(id => {
           const a = state.entities[id];
-          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "retreat" });
+          pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "retreat");
         });
       }
 
@@ -342,18 +552,17 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
           if (chosenEntity?.isChest) {
             const chest = chosenEntity;
-            events.push({ text: `${adventurer.name} discovers a ${chest.name} in ${zoneName}!`, type: "scouting" });
+            pushEvent(events, adventurer.id, `${adventurer.name} discovers a ${chest.name} in ${zoneName}!`, "scouting");
 
             const chestItemEntities = chest.lootItems.map(id => state.entities[id]);
             chest.lootSummary = formatLootSummary(chestItemEntities, 0);
 
-            const lootNewIDs = await attempt("loot-chest-all", "adventurer", { adventurer: ["adventurer"], chest: [chest.id] }, true);
+            const lootNewIDs = await attempt("loot-chest-all", adventurer.id, { adventurer: [adventurer.id], chest: [chest.id] }, true);
             lootNewIDs.forEach(id => {
               const a = state.entities[id];
-              events.push({ text: a.report ?? a.gloss ?? "(action)", type: "loot" });
+              pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "loot");
             });
 
-            // All chest items go to inventory first; equip-item below will move upgrades to equipment.
             for (const itemId of chest.lootItems) {
               adventurer.inventory = [...(adventurer.inventory ?? []), state.entities[itemId]];
             }
@@ -368,36 +577,35 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
             const newFaction = !(factionId in adventurer.factionRelationships);
             if (newFaction) adventurer.factionRelationships[factionId] = initialFactionRep(factionId);
             const factionNote = newFaction ? ` ${FACTIONS[factionId]?.name ?? factionId} added to known factions.` : "";
-            events.push({ text: `${adventurer.name} spots a level ${enemyTemplate.level} ${enemyTemplate.name} in ${zoneName}.${factionNote}`, type: "scouting" });
+            pushEvent(events, adventurer.id, `${adventurer.name} spots a level ${enemyTemplate.level} ${enemyTemplate.name} in ${zoneName}.${factionNote}`, "scouting");
           } else {
             const vendor = ALL_VENDORS.find(v => v.id === chosen.id);
             if (vendor) {
-              events.push({ text: `${adventurer.name} encounters ${vendor.name} in ${zoneName}!`, type: "scouting" });
+              pushEvent(events, adventurer.id, `${adventurer.name} encounters ${vendor.name} in ${zoneName}!`, "scouting");
             } else {
               const questGiver = ALL_QUEST_GIVERS.find(qg => qg.id === chosen.id);
-              events.push({ text: `${adventurer.name} meets ${questGiver.name} in ${zoneName}!`, type: "scouting" });
+              pushEvent(events, adventurer.id, `${adventurer.name} meets ${questGiver.name} in ${zoneName}!`, "scouting");
             }
           }
         } else {
-          events.push({ text: `${adventurer.name} searches ${zoneName} but finds nothing unusual.`, type: "scouting" });
+          pushEvent(events, adventurer.id, `${adventurer.name} searches ${zoneName} but finds nothing unusual.`, "scouting");
         }
       }
 
     } else if (selectedActionName === "complete-quest") {
       newActionIDs.forEach(id => {
         const a = state.entities[id];
-        events.push({ text: a.report ?? a.gloss ?? "(action)", type: "quest" });
+        pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "quest");
       });
       const activeGiver = ALL_QUEST_GIVERS.find(qg => qg.id === adventurer.questGiverId) ?? QUEST_GIVER;
-      events.push({ text: `${adventurer.name} receives ${adventurer.questXpReward} XP from ${activeGiver.name}!`, type: "quest" });
+      pushEvent(events, adventurer.id, `${adventurer.name} receives ${adventurer.questXpReward} XP from ${activeGiver.name}!`, "quest");
       adventurer.completedQuests = [...(adventurer.completedQuests ?? []), adventurer.questId];
       adventurer.questItemCollected = false;
 
-      // Fire level-up if queued by complete-quest's reaction
-      const levelUpNewIDs = await select({ initiatorID: "adventurer", urgentOnly: true });
+      const levelUpNewIDs = await select({ initiatorID: adventurer.id, urgentOnly: true });
       levelUpNewIDs.forEach(id => {
         const a = state.entities[id];
-        events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
+        pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "victory");
       });
 
     } else if (selectedActionName === "sell-items") {
@@ -406,14 +614,11 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       const soldAt = discoveredVendorsHere[0];
       newActionIDs.forEach(id => {
         const a = state.entities[id];
-        events.push({ text: a.report ?? a.gloss ?? "(action)", type: "vendor" });
+        pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "vendor");
       });
       adventurer.copper = (adventurer.copper ?? 0) + sellValue;
       adventurer.inventory = (adventurer.inventory ?? []).filter(item => item.isQuestItem);
-      events.push({
-        text: `${adventurer.name} sells ${toSell.length} item(s) to ${soldAt.name} for ${copperToString(sellValue)}.`,
-        type: "vendor",
-      });
+      pushEvent(events, adventurer.id, `${adventurer.name} sells ${toSell.length} item(s) to ${soldAt.name} for ${copperToString(sellValue)}.`, "vendor");
 
     } else if (selectedActionName === "buy-item") {
       if (buyableCandidates.length > 0) {
@@ -437,24 +642,20 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
         newActionIDs.forEach(id => {
           const a = state.entities[id];
-          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "vendor" });
+          pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "vendor");
         });
-        events.push({
-          text: `${adventurer.name} buys ${boughtItem.name} from ${boughtFrom.name} for ${copperToString(boughtItem.cost)}.`,
-          type: "vendor",
-        });
+        pushEvent(events, adventurer.id, `${adventurer.name} buys ${boughtItem.name} from ${boughtFrom.name} for ${copperToString(boughtItem.cost)}.`, "vendor");
 
-        // Fire purchase-item so its reaction urgent-queues equip-item
-        const purchaseNewIDs = await attempt("purchase-item", "adventurer", { adventurer: ["adventurer"], item: [boughtItemId], vendor: [boughtFrom.id] }, true);
+        const purchaseNewIDs = await attempt("purchase-item", adventurer.id, { adventurer: [adventurer.id], item: [boughtItemId], vendor: [boughtFrom.id] }, true);
         purchaseNewIDs.forEach(id => {
           const a = state.entities[id];
-          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "vendor" });
+          pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "vendor");
         });
 
-        await drainUrgent(newIds => {
+        await drainUrgent(adventurer.id, newIds => {
           newIds.forEach(id => {
             const a = state.entities[id];
-            events.push({ text: a.report ?? a.gloss ?? "(action)", type: "vendor" });
+            pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "vendor");
             if (a.name === "equip-item") {
               const slot = adventurer.pendingEquipSlot;
               const boughtEntity = state.entities[boughtItemId];
@@ -472,30 +673,61 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       }
 
     } else if (selectedActionName === "travel-to-quest-zone" || selectedActionName === "return-to-quest-giver") {
-      // Viv effect already updated adventurer.location; just surface the event
       newActionIDs.forEach(id => {
         const a = state.entities[id];
-        events.push({ text: a.report ?? a.gloss ?? "(action)", type: "quest" });
+        pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "quest");
       });
 
     } else {
       newActionIDs.forEach(id => {
         const a = state.entities[id];
-        events.push({ text: a.report ?? a.gloss ?? "(action)", type: "" });
+        pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "");
       });
     }
 
-    state.timestamp += 10;
-    ticks.push({ index: t, timestamp: state.timestamp, events, character: structuredClone(state.entities["adventurer"]) });
+    // After hunting actions, check whether the party is fully hunt-done and should disband
+    await maybeDisbandParty(adventurer, events);
   }
 
-  return { character: initialChar, ticks };
+  // --- Sim loop ---
+
+  const ticks = [];
+  const initialChars = Object.fromEntries(state.players.map(pid => [pid, structuredClone(state.entities[pid])]));
+
+  for (let t = 0; t < tickCount; t++) {
+    if (!state.chestState.activeChestId && t >= state.chestState.cooldownUntilTick) {
+      if (rng() < chestConfig.spawnChance) {
+        const { chestId, zoneId } = spawnChest(chestConfig, EntityType, rng, state);
+        await attempt("spawn-chest", "world", { world: ["world"], chest: [chestId], zone: [zoneId] }, true);
+      }
+    }
+
+    const events = [];
+    for (const pid of state.players) {
+      await preActionUpdates(pid, events);
+      await tickPlanner();
+      await processPlayerTick(pid, t, events);
+    }
+
+    state.timestamp += 10;
+    const characters = Object.fromEntries(
+      state.players.map(pid => [pid, structuredClone(state.entities[pid])])
+    );
+    ticks.push({ index: t, timestamp: state.timestamp, events, characters });
+  }
+
+  return { characters: initialChars, ticks, playerIds: state.players };
 }
 
 export function summarize(tick) {
-  const c = tick.character;
-  const loc = ZONE_MAP.get(c.location)?.name ?? c.location;
-  const questPart = c.questActive ? ` [Quest: ${c.questKillsDone ?? 0}/${c.questKillsNeeded ?? 0}]` : "";
-  const copperPart = (c.copper ?? 0) > 0 ? ` [${copperToString(c.copper)}]` : "";
-  return `${c.name} (${c.class}, Lv.${c.level ?? 1}, ${c.xp ?? 0} XP) @ ${loc}${questPart}${copperPart}`;
+  const lines = [];
+  for (const pid of Object.keys(tick.characters)) {
+    const c = tick.characters[pid];
+    const loc = ZONE_MAP.get(c.location)?.name ?? c.location;
+    const questPart = c.questActive ? ` [Quest: ${c.questKillsDone ?? 0}/${c.questKillsNeeded ?? 0}]` : "";
+    const copperPart = (c.copper ?? 0) > 0 ? ` [${copperToString(c.copper)}]` : "";
+    const partyPart = c.partyActive ? ` [Party ${c.partyMembers?.length ?? 0}]` : "";
+    lines.push(`${c.name} (${c.class}, Lv.${c.level ?? 1}, ${c.xp ?? 0} XP) @ ${loc}${questPart}${copperPart}${partyPart}`);
+  }
+  return lines.join("  |  ");
 }
