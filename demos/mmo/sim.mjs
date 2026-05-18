@@ -74,9 +74,11 @@ export const ZONES = [
   { id: "hearthfield",  name: "Hearthfield",       desc: "A peaceful hillside settlement where new arrivals catch their first breath." },
   { id: "millhaven",    name: "Millhaven",          desc: "A busy crossroads hamlet; the Wayward Lantern inn draws travelers from across the realm." },
   { id: "briar_edge",   name: "The Briar's Edge",   desc: "The treeline thickens here; wolves and bandits lurk in the tangled undergrowth." },
-  { id: "stonewick",    name: "Stonewick Farm",     desc: "Rolling fields and weathered farmhouses, goats grazing in the amber light." },
+  { id: "stonewick",    name: "Stonewick Farm",      desc: "Rolling fields and weathered farmhouses, goats grazing in the amber light." },
   { id: "stillwater",   name: "Stillwater Mere",    desc: "A glittering lake that mirrors the sky. Scouts watch from the reed banks." },
 ];
+
+export const ZONE_MAP = new Map(ZONES.map(z => [z.id, z]));
 
 export const LEVEL_XP_MIN = [0, 300, 900, 2700, 6500, 14000];
 export const LEVEL_CAP = 6;
@@ -123,6 +125,12 @@ export const VENDOR_ARNAULT = {
 };
 
 export const ALL_VENDORS = [VENDOR_ARNAULT];
+
+// Pre-indexed by zone for O(1) lookup in the tick loop
+const QUEST_GIVERS_BY_ZONE = {};
+for (const qg of ALL_QUEST_GIVERS) (QUEST_GIVERS_BY_ZONE[qg.location] ??= []).push(qg);
+const VENDORS_BY_ZONE = {};
+for (const v of ALL_VENDORS) (VENDORS_BY_ZONE[v.location] ??= []).push(v);
 
 export const QUEST_ITEMS = {
   captains_insignia: {
@@ -206,9 +214,6 @@ export const ZONE_ENEMIES = {
   stillwater: ["grimspawn_warrior", "grimspawn_enforcer", "grimspawn_captain", "grimspawn_warlord"],
 };
 
-// Unified discoverable NPC pool per zone. Contains only non-player characters (enemies, quest givers,
-// vendors, etc.) — player characters are never discoverable. Each entry is { id, discoveryRate }; role
-// is inferred from entity data after discovery (ENEMY_TEMPLATES, ALL_QUEST_GIVERS, ALL_VENDORS, etc.).
 export const ZONE_DISCOVERABLES = Object.fromEntries(
   ZONES.map(z => [
     z.id,
@@ -220,10 +225,8 @@ export const ZONE_DISCOVERABLES = Object.fromEntries(
   ])
 );
 
-// Hostile zones where chests can spawn. Kept separate so CHEST_CONFIGS can reference it.
 export const HOSTILE_ZONES = ["briar_edge", "stonewick", "stillwater"];
 
-// Level-range → item power level range (unified mapping used by chests and future systems).
 // level 1-5 bracket maps to item power levels 2-3 (above starter gear, below endgame).
 export const LEVEL_RANGE_POWER = [
   { minLevel: 1, maxLevel: 5, minPowerLevel: 2, maxPowerLevel: 3 },
@@ -528,34 +531,70 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
   initializeVivRuntime({ contentBundle: bundle, adapter });
 
+  // --- Tick-loop helpers ---
+
+  async function attempt(actionName, initiatorID, precastBindings, suppressConditions) {
+    const before = new Set(state.actions);
+    await attemptAction({ actionName, initiatorID, precastBindings, suppressConditions });
+    return state.actions.filter(id => !before.has(id));
+  }
+
+  async function select(opts) {
+    const before = new Set(state.actions);
+    await selectAction(opts);
+    return state.actions.filter(id => !before.has(id));
+  }
+
+  // Drains the urgent-action queue, calling onNew(ids) for each batch until empty.
+  async function drainUrgent(onNew) {
+    while (true) {
+      const newIds = await select({ initiatorID: "adventurer", urgentOnly: true });
+      if (newIds.length === 0) break;
+      onNew(newIds);
+    }
+  }
+
+  // Equips each item from itemIds if it beats the currently equipped slot power.
+  async function equipFromList(adventurer, itemIds, events) {
+    for (const itemId of itemIds) {
+      const item = state.entities[itemId];
+      const currentPower = adventurer.equipment[item.slot]?.powerLevel ?? 0;
+      if (item.powerLevel > currentPower) {
+        const newIds = await attempt("equip-item", "adventurer", { adventurer: ["adventurer"], item: [itemId] }, true);
+        newIds.forEach(id => {
+          const a = state.entities[id];
+          events.push({ text: a.report ?? a.gloss ?? "(action)", type: "loot" });
+        });
+        const displaced = adventurer.equipment[item.slot];
+        if (displaced) adventurer.inventory = [...adventurer.inventory, { ...displaced, slot: item.slot }];
+        adventurer.equipment[item.slot] = { name: item.name, powerLevel: item.powerLevel };
+        adventurer.inventory = adventurer.inventory.filter(i => i.id !== itemId);
+      }
+    }
+  }
+
+  // --- Sim loop ---
+
   const ticks = [];
   const initialChar = structuredClone(state.entities["adventurer"]);
   const xpCap = LEVEL_XP_MIN[LEVEL_CAP - 1];
   const chestConfig = CHEST_CONFIGS[0];
 
   for (let t = 0; t < tickCount; t++) {
-    // Chest spawn check: 25% chance per tick when no chest is active and cooldown has passed.
     if (!state.chestState.activeChestId && t >= state.chestState.cooldownUntilTick) {
       if (rng() < chestConfig.spawnChance) {
         const { chestId, zoneId } = spawnChest(chestConfig, EntityType, rng, state);
-        await attemptAction({
-          actionName: "spawn-chest",
-          initiatorID: "world",
-          precastBindings: { world: ["world"], chest: [chestId], zone: [zoneId] },
-          suppressConditions: true,
-        });
+        await attempt("spawn-chest", "world", { world: ["world"], chest: [chestId], zone: [zoneId] }, true);
       }
     }
 
     const adventurer = state.entities["adventurer"];
     const locationID = adventurer.location;
-    const zoneName = ZONES.find(z => z.id === locationID)?.name ?? locationID;
+    const zoneName = ZONE_MAP.get(locationID)?.name ?? locationID;
     const discoveredHere = adventurer.discoveredNPCs[locationID] ?? [];
 
-    // Undiscovered pool: any Viv character in this zone not yet found
     const undiscoveredPool = (ZONE_DISCOVERABLES[locationID] ?? []).filter(d => !discoveredHere.includes(d.id));
 
-    // If a chest is spawned in this zone and not yet discovered, add it to the pool.
     if (state.chestState.activeChestId) {
       const chest = state.entities[state.chestState.activeChestId];
       if (chest?.location === locationID && !discoveredHere.includes(chest.id)) {
@@ -564,14 +603,10 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     }
 
     // Quest givers already discovered here — used for auto-accept logic below
-    const discoveredQuestGiversHere = ALL_QUEST_GIVERS.filter(qg =>
-      qg.location === locationID && discoveredHere.includes(qg.id)
-    );
+    const discoveredQuestGiversHere = (QUEST_GIVERS_BY_ZONE[locationID] ?? []).filter(qg => discoveredHere.includes(qg.id));
 
     // Vendors already discovered here — used for buy/sell flag computation
-    const discoveredVendorsHere = ALL_VENDORS.filter(v =>
-      v.location === locationID && discoveredHere.includes(v.id)
-    );
+    const discoveredVendorsHere = (VENDORS_BY_ZONE[locationID] ?? []).filter(v => discoveredHere.includes(v.id));
 
     // Update quest state flags read by Viv plan conditions
     if (adventurer.questActive) {
@@ -605,13 +640,10 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       }
     }
 
-    // Viv's quest-directed selector handles all quest-phase routing; these flags just expose
-    // what's possible at the current location and are read as conditions by Viv actions.
+    // These flags expose what's possible at the current location and are read as conditions by Viv actions.
     adventurer.canFight = discoveredHere.some(id => id in ENEMY_TEMPLATES);
     adventurer.canScout = undiscoveredPool.length > 0;
 
-    // Vendor interaction flags: sell when inventory has non-quest items; buy when a vendor here
-    // stocks an item whose power level exceeds the equipped slot and the player can afford it.
     const sellableItems = (adventurer.inventory ?? []).filter(item => !item.isQuestItem);
     adventurer.canSellItems = sellableItems.length > 0 && discoveredVendorsHere.length > 0;
 
@@ -628,15 +660,11 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
     const events = [];
 
-    // Fire pending accept-quest (from first encounter or return visit)
     if (adventurer.pendingAcceptQuest) {
       adventurer.pendingAcceptQuest = false;
       const quest = QUESTS.find(q => q.id === adventurer.pendingQuestId);
       const activeQuestGiverId = adventurer.pendingAcceptQuestGiverId ?? QUEST_GIVER.id;
-      const questBindings = { adventurer: ["adventurer"], questGiver: [activeQuestGiverId] };
-      const acceptBefore = new Set(state.actions);
-      await attemptAction({ actionName: "accept-quest", initiatorID: "adventurer", precastBindings: questBindings });
-      const newAcceptIDs = state.actions.filter(id => !acceptBefore.has(id));
+      const newAcceptIDs = await attempt("accept-quest", "adventurer", { adventurer: ["adventurer"], questGiver: [activeQuestGiverId] });
       if (newAcceptIDs.length > 0 && quest) {
         adventurer.questId = quest.id;
         adventurer.questGiverId = activeQuestGiverId;
@@ -661,13 +689,10 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     await tickPlanner();
 
     // Viv's pick-activity selector drives all routing: quest-directed (in order) → free-roaming
-    const actionsBefore = new Set(state.actions);
-    await selectAction({ initiatorID: "adventurer" });
-    const newActionIDs = state.actions.filter(id => !actionsBefore.has(id));
+    const newActionIDs = await select({ initiatorID: "adventurer" });
     const selectedActionName = newActionIDs.length > 0 ? state.entities[newActionIDs[0]].name : null;
 
     if (selectedActionName === "fight") {
-      // Bias toward quest target when Viv selects fight during the hunt phase
       const enemiesDiscoveredHere = discoveredHere.filter(id => id in ENEMY_TEMPLATES);
       const inHuntPhase = adventurer.questActive && (adventurer.questEnemyFound ?? false) && !(adventurer.questHuntDone ?? false);
       const questTargetHere = inHuntPhase && locationID === adventurer.questTargetZone && enemiesDiscoveredHere.includes(adventurer.questTargetTemplate);
@@ -687,8 +712,6 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       const combatBindings = { adventurer: ["adventurer"], enemy: [enemyId] };
 
       if (playerWins) {
-        // Build the enemy's loot bundle (items + copper) and attach it to the enemy entity so the
-        // kill reaction can queue loot-all when @enemy.hasLoot is true.
         const loot = generateLoot(rng, enemy);
         const lootItemEntities = loot.items.map(it => {
           const id = makeUUID(rng);
@@ -701,19 +724,16 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         enemy.lootSummary = formatLootSummary(lootItemEntities, loot.copper);
         enemy.hasLoot = lootItemEntities.length > 0 || loot.copper > 0;
 
-        const killBefore = new Set(state.actions);
-        await attemptAction({ actionName: "kill", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
-        state.actions.filter(id => !killBefore.has(id)).forEach(id => {
+        const killNewIDs = await attempt("kill", "adventurer", combatBindings, true);
+        killNewIDs.forEach(id => {
           const a = state.entities[id];
           events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
         });
 
-        // Track quest kill progress
         if (adventurer.questActive && enemy.templateId === templateId && templateId === adventurer.questTargetTemplate) {
           adventurer.questKillsDone = (adventurer.questKillsDone ?? 0) + 1;
         }
 
-        // Quest item drop — only when the player has the quest and hasn't collected it yet
         if (adventurer.questActive && !adventurer.questItemCollected) {
           const activeQuest = QUESTS.find(q => q.id === adventurer.questId);
           if (activeQuest?.questItem) {
@@ -725,13 +745,8 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
           }
         }
 
-        // Drain urgent reactions queued by kill: level-up and loot-all.
-        while (true) {
-          const urgentBefore = new Set(state.actions);
-          await selectAction({ initiatorID: "adventurer", urgentOnly: true });
-          const urgentNew = state.actions.filter(id => !urgentBefore.has(id));
-          if (urgentNew.length === 0) break;
-          urgentNew.forEach(id => {
+        await drainUrgent(newIds => {
+          newIds.forEach(id => {
             const a = state.entities[id];
             const evType = a.name === "loot-all" ? "loot" : "victory";
             events.push({ text: a.report ?? a.gloss ?? "(action)", type: evType });
@@ -742,36 +757,13 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
               adventurer.copper = (adventurer.copper ?? 0) + (enemy.lootCopper ?? 0);
             }
           });
-        }
+        });
 
-        // Equip each upgraded item from the bundle — one equip-item event per upgrade.
-        for (const itemId of enemy.lootItems) {
-          const item = state.entities[itemId];
-          const currentPower = adventurer.equipment[item.slot]?.powerLevel ?? 0;
-          if (item.powerLevel > currentPower) {
-            const equipBefore = new Set(state.actions);
-            await attemptAction({
-              actionName: "equip-item",
-              initiatorID: "adventurer",
-              precastBindings: { adventurer: ["adventurer"], item: [itemId] },
-              suppressConditions: true,
-            });
-            state.actions.filter(id => !equipBefore.has(id)).forEach(id => {
-              const a = state.entities[id];
-              events.push({ text: a.report ?? a.gloss ?? "(action)", type: "loot" });
-            });
-            const displaced = adventurer.equipment[item.slot];
-            if (displaced) {
-              adventurer.inventory = [...(adventurer.inventory ?? []), { ...displaced, slot: item.slot }];
-            }
-            adventurer.equipment[item.slot] = { name: item.name, powerLevel: item.powerLevel };
-            adventurer.inventory = (adventurer.inventory ?? []).filter(i => i.id !== itemId);
-          }
-        }
+        await equipFromList(adventurer, enemy.lootItems, events);
+
       } else {
-        const retreatBefore = new Set(state.actions);
-        await attemptAction({ actionName: "retreat", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
-        state.actions.filter(id => !retreatBefore.has(id)).forEach(id => {
+        const retreatNewIDs = await attempt("retreat", "adventurer", combatBindings, true);
+        retreatNewIDs.forEach(id => {
           const a = state.entities[id];
           events.push({ text: a.report ?? a.gloss ?? "(action)", type: "retreat" });
         });
@@ -779,8 +771,6 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
     } else if (selectedActionName === "look-around") {
       if (undiscoveredPool.length > 0) {
-        // When on a quest, bias toward the quest target if it's still undiscovered.
-        // Chests are never the quest target, so they don't interfere with quest bias.
         const questTargetEntry = (adventurer.questActive && !adventurer.questEnemyFound)
           ? undiscoveredPool.find(d => d.id === adventurer.questTargetTemplate)
           : null;
@@ -794,21 +784,14 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
           const enemyTemplate = ENEMY_TEMPLATES[chosen.id];
 
           if (chosenEntity?.isChest) {
-            // Chest discovered — fire loot-chest-all + per-upgrade equip-item on this same tick.
             const chest = chosenEntity;
             events.push({ text: `${adventurer.name} discovers a ${chest.name} in ${zoneName}!`, type: "scouting" });
 
             const chestItemEntities = chest.lootItems.map(id => state.entities[id]);
             chest.lootSummary = formatLootSummary(chestItemEntities, 0);
 
-            const lootBefore = new Set(state.actions);
-            await attemptAction({
-              actionName: "loot-chest-all",
-              initiatorID: "adventurer",
-              precastBindings: { adventurer: ["adventurer"], chest: [chest.id] },
-              suppressConditions: true,
-            });
-            state.actions.filter(id => !lootBefore.has(id)).forEach(id => {
+            const lootNewIDs = await attempt("loot-chest-all", "adventurer", { adventurer: ["adventurer"], chest: [chest.id] }, true);
+            lootNewIDs.forEach(id => {
               const a = state.entities[id];
               events.push({ text: a.report ?? a.gloss ?? "(action)", type: "loot" });
             });
@@ -818,32 +801,8 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
               adventurer.inventory = [...(adventurer.inventory ?? []), state.entities[itemId]];
             }
 
-            // Equip each upgrade — one equip-item event per upgrade.
-            for (const itemId of chest.lootItems) {
-              const item = state.entities[itemId];
-              const currentPower = adventurer.equipment[item.slot]?.powerLevel ?? 0;
-              if (item.powerLevel > currentPower) {
-                const equipBefore = new Set(state.actions);
-                await attemptAction({
-                  actionName: "equip-item",
-                  initiatorID: "adventurer",
-                  precastBindings: { adventurer: ["adventurer"], item: [itemId] },
-                  suppressConditions: true,
-                });
-                state.actions.filter(id => !equipBefore.has(id)).forEach(id => {
-                  const a = state.entities[id];
-                  events.push({ text: a.report ?? a.gloss ?? "(action)", type: "loot" });
-                });
-                const displaced = adventurer.equipment[item.slot];
-                if (displaced) {
-                  adventurer.inventory = [...(adventurer.inventory ?? []), { ...displaced, slot: item.slot }];
-                }
-                adventurer.equipment[item.slot] = { name: item.name, powerLevel: item.powerLevel };
-                adventurer.inventory = (adventurer.inventory ?? []).filter(i => i.id !== itemId);
-              }
-            }
+            await equipFromList(adventurer, chest.lootItems, events);
 
-            // Chest is fully looted; start cooldown before the next one can spawn.
             state.chestState.activeChestId = null;
             state.chestState.cooldownUntilTick = t + chestConfig.cooldownTicks;
 
@@ -878,9 +837,8 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       adventurer.questItemCollected = false;
 
       // Fire level-up if queued by complete-quest's reaction
-      const levelUpBefore = new Set(state.actions);
-      await selectAction({ initiatorID: "adventurer", urgentOnly: true });
-      state.actions.filter(id => !levelUpBefore.has(id)).forEach(id => {
+      const levelUpNewIDs = await select({ initiatorID: "adventurer", urgentOnly: true });
+      levelUpNewIDs.forEach(id => {
         const a = state.entities[id];
         events.push({ text: a.report ?? a.gloss ?? "(action)", type: "victory" });
       });
@@ -930,25 +888,14 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         });
 
         // Fire purchase-item so its reaction urgent-queues equip-item
-        const purchaseBefore = new Set(state.actions);
-        await attemptAction({
-          actionName: "purchase-item",
-          initiatorID: "adventurer",
-          precastBindings: { adventurer: ["adventurer"], item: [boughtItemId], vendor: [boughtFrom.id] },
-          suppressConditions: true,
-        });
-        state.actions.filter(id => !purchaseBefore.has(id)).forEach(id => {
+        const purchaseNewIDs = await attempt("purchase-item", "adventurer", { adventurer: ["adventurer"], item: [boughtItemId], vendor: [boughtFrom.id] }, true);
+        purchaseNewIDs.forEach(id => {
           const a = state.entities[id];
           events.push({ text: a.report ?? a.gloss ?? "(action)", type: "vendor" });
         });
 
-        // Drain urgent queue: equip-item fires here
-        while (true) {
-          const urgentBefore = new Set(state.actions);
-          await selectAction({ initiatorID: "adventurer", urgentOnly: true });
-          const urgentNew = state.actions.filter(id => !urgentBefore.has(id));
-          if (urgentNew.length === 0) break;
-          urgentNew.forEach(id => {
+        await drainUrgent(newIds => {
+          newIds.forEach(id => {
             const a = state.entities[id];
             events.push({ text: a.report ?? a.gloss ?? "(action)", type: "vendor" });
             if (a.name === "equip-item") {
@@ -964,7 +911,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
               }
             }
           });
-        }
+        });
       }
 
     } else if (selectedActionName === "travel-to-quest-zone" || selectedActionName === "return-to-quest-giver") {
@@ -990,7 +937,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
 export function summarize(tick) {
   const c = tick.character;
-  const loc = ZONES.find(z => z.id === c.location)?.name ?? c.location;
+  const loc = ZONE_MAP.get(c.location)?.name ?? c.location;
   const questPart = c.questActive ? ` [Quest: ${c.questKillsDone ?? 0}/${c.questKillsNeeded ?? 0}]` : "";
   const copperPart = (c.copper ?? 0) > 0 ? ` [${copperToString(c.copper)}]` : "";
   return `${c.name} (${c.class}, Lv.${c.level ?? 1}, ${c.xp ?? 0} XP) @ ${loc}${questPart}${copperPart}`;
