@@ -5,24 +5,24 @@ const runtime = { initializeVivRuntime, attemptAction, selectAction, EntityType 
 let bundle = null;
 let game = null;
 let busy = false;
+let selectedInitiator = null;
 let selectedTarget = null;
 let lastActSeen = 1;
 
 const statusEl       = document.getElementById("status");
 const logEl          = document.getElementById("log");
 const castGridEl     = document.getElementById("cast-grid");
-const actionPanelEl  = document.getElementById("action-panel");
 const actionListEl   = document.getElementById("action-list");
 const actionHintEl   = document.getElementById("action-hint");
 const turnCountEl    = document.getElementById("turn-count");
 const outcomeEl      = document.getElementById("outcome");
 const actLabelEl     = document.getElementById("act-label");
 const subtitleEl     = document.getElementById("subtitle");
-const alexStatusesEl = document.getElementById("alex-statuses");
-const goalSectionEl  = document.getElementById("goal-section");
 const goalTitleEl    = document.getElementById("goal-title");
 const goalFlavorEl   = document.getElementById("goal-flavor");
 const goalHintEl     = document.getElementById("goal-hint");
+const selectionLabelEl = document.getElementById("selection-label");
+const clearSelectionEl = document.getElementById("clear-selection");
 
 function setStatus(msg, isError = false) {
   statusEl.textContent = msg;
@@ -42,74 +42,145 @@ function renderActHeader(actNumber, turn) {
   turnCountEl.textContent = `Turn ${turn} / ${totalTurns}`;
 }
 
+function relationBadges(state, characterID) {
+  const c = state.characters.find(c => c.id === characterID);
+  if (!c) return "";
+  const badges = [];
+  for (const [otherID, rel] of Object.entries(c.relationships ?? {})) {
+    const other = CHARACTER_DEFS[otherID];
+    if (!other) continue;
+    badges.push(`<span class="badge badge-${rel}">${rel} · ${other.name}</span>`);
+  }
+  for (const [otherID, hasCrush] of Object.entries(c.crushes ?? {})) {
+    if (!hasCrush) continue;
+    const other = CHARACTER_DEFS[otherID];
+    if (!other) continue;
+    badges.push(`<span class="badge badge-crush">crush · ${other.name}</span>`);
+  }
+  return badges.length ? `<div class="cast-badges">${badges.join("")}</div>` : "";
+}
+
+function selectionRoleFor(id) {
+  if (id === selectedInitiator) return "initiator";
+  if (id === selectedTarget)    return "target";
+  return null;
+}
+
+function handleCastClick(id) {
+  if (busy) return;
+  if (selectedInitiator === id) {
+    // Click initiator → clear selection
+    selectedInitiator = null;
+    selectedTarget = null;
+  } else if (selectedTarget === id) {
+    // Click current target → clear target only
+    selectedTarget = null;
+  } else if (!selectedInitiator) {
+    selectedInitiator = id;
+    selectedTarget = null;
+  } else if (!selectedTarget) {
+    selectedTarget = id;
+  } else {
+    // Both set; new click becomes the new initiator
+    selectedInitiator = id;
+    selectedTarget = null;
+  }
+  renderCast(game.getState());
+  renderActions();
+}
+
 function renderCast(state) {
   castGridEl.innerHTML = "";
   for (const c of state.characters) {
-    const snap = game.getSnapshot(c.id);
+    const role = selectionRoleFor(c.id);
     const card = document.createElement("button");
-    card.className = "cast-card" + (selectedTarget === c.id ? " selected" : "");
+    card.className = "cast-card" + (role ? ` selected role-${role}` : "");
     card.disabled = busy;
+
+    const showNetworks = selectedInitiator && c.id !== selectedInitiator;
+    let networkRow = "";
+    if (showNetworks) {
+      const snap = game.getSnapshot(selectedInitiator, c.id);
+      const vibe = game.getPairVibe(selectedInitiator, c.id);
+      networkRow = `
+        <div class="cast-vibe ${vibe.cls}">${vibe.label}</div>
+        <div class="cast-networks">
+          <span>buddy ${snap.buddy}</span><span>romance ${snap.romance}</span>
+          <span>cool ${snap.cool}</span><span>tension ${snap.tension}</span>
+        </div>`;
+    }
+
+    const roleTag = role === "initiator"
+      ? `<span class="role-tag role-tag-initiator">Initiator</span>`
+      : role === "target"
+        ? `<span class="role-tag role-tag-target">Receiver</span>`
+        : "";
+
     card.innerHTML = `
       <div class="cast-row">
         <div class="cast-portrait">${c.portrait}</div>
-        <div>
-          <div class="cast-name">${c.name}</div>
+        <div class="cast-id">
+          <div class="cast-name">${c.name}${roleTag}</div>
           <div class="cast-traits">${c.traits.slice(0, 2).join(" · ")}</div>
         </div>
       </div>
-      <div class="cast-vibe ${c.vibe.cls}">${c.vibe.label}</div>
-      <div class="cast-networks">
-        <span>buddy ${snap.focusBuddy}</span><span>romance ${snap.focusRomance}</span>
-        <span>cool ${snap.focusCool}</span><span>tension ${snap.focusTension}</span>
-      </div>
+      ${networkRow}
+      ${relationBadges(state, c.id)}
     `;
-    card.addEventListener("click", () => {
-      selectedTarget = c.id;
-      renderCast(state);
-      renderActions();
-    });
+    card.addEventListener("click", () => handleCastClick(c.id));
     castGridEl.appendChild(card);
   }
 }
 
-function renderAlexStatuses(state) {
-  alexStatusesEl.innerHTML = "";
-  const ss = state.alexStatuses ?? {};
-  if (ss.popular) {
-    const pill = document.createElement("span");
-    pill.className = "status-pill popular";
-    pill.textContent = "Popular";
-    alexStatusesEl.appendChild(pill);
+function renderSelectionLabel() {
+  if (!selectedInitiator) {
+    selectionLabelEl.innerHTML = `<span class="hint">First click an initiator, then a receiver.</span>`;
+    clearSelectionEl.hidden = true;
+    return;
   }
-  const crushes = ss.crush ?? {};
-  for (const [id, hasCrush] of Object.entries(crushes)) {
-    if (!hasCrush) continue;
-    const def = CHARACTER_DEFS[id];
-    if (!def) continue;
-    const pill = document.createElement("span");
-    pill.className = "status-pill";
-    pill.textContent = `Crush: ${def.name}`;
-    alexStatusesEl.appendChild(pill);
+  const iDef = CHARACTER_DEFS[selectedInitiator];
+  if (!selectedTarget) {
+    selectionLabelEl.innerHTML = `
+      <span class="sel-name">${iDef.portrait} ${iDef.name}</span>
+      <span class="arrow">→</span>
+      <span class="hint">pick a receiver</span>
+    `;
+  } else {
+    const tDef = CHARACTER_DEFS[selectedTarget];
+    selectionLabelEl.innerHTML = `
+      <span class="sel-name">${iDef.portrait} ${iDef.name}</span>
+      <span class="arrow">→</span>
+      <span class="sel-name">${tDef.portrait} ${tDef.name}</span>
+    `;
   }
+  clearSelectionEl.hidden = false;
 }
 
 function renderActions() {
+  renderSelectionLabel();
   actionListEl.innerHTML = "";
-  if (!selectedTarget) {
-    actionHintEl.textContent = "Pick a target above";
-    actionListEl.innerHTML = `<div class="action-empty">Select someone from the cast to see what you can do.</div>`;
+
+  if (!selectedInitiator) {
+    actionHintEl.textContent = "Pick two characters above";
+    actionListEl.innerHTML = `<div class="action-empty">Click someone to choose who acts — then click their receiver.</div>`;
     return;
   }
-  const targetDef = CHARACTER_DEFS[selectedTarget];
-  const available = game.getAvailableActions(selectedTarget);
-  actionHintEl.textContent = `Toward ${targetDef.name} · ${available.length} option${available.length === 1 ? "" : "s"}`;
+  if (!selectedTarget) {
+    actionHintEl.textContent = "Now pick a receiver";
+    actionListEl.innerHTML = `<div class="action-empty">${CHARACTER_DEFS[selectedInitiator].name} is ready. Click another character to be the receiver.</div>`;
+    return;
+  }
+
+  const iDef = CHARACTER_DEFS[selectedInitiator];
+  const tDef = CHARACTER_DEFS[selectedTarget];
+  const available = game.getAvailableActions(selectedInitiator, selectedTarget);
+  actionHintEl.textContent = `${iDef.name} → ${tDef.name} · ${available.length} option${available.length === 1 ? "" : "s"}`;
 
   if (available.length === 0) {
-    actionListEl.innerHTML = `<div class="action-empty">Nothing comes to mind right now. Try a different target.</div>`;
+    actionListEl.innerHTML = `<div class="action-empty">${iDef.name} doesn't feel like doing anything with ${tDef.name} right now. Try a different pair.</div>`;
     return;
   }
 
-  // Group by category, preserving the global volition-sort within each group.
   const byCategory = {};
   for (const a of available) (byCategory[a.category] ??= []).push(a);
 
@@ -140,7 +211,7 @@ function renderActions() {
   }
 }
 
-function appendLogEntry({ turn, actionDef, exchangeGloss, responseGloss, triggers, actNumber }) {
+function appendLogEntry({ turn, initiatorName, targetName, actionDef, exchangeGloss, responseGloss, triggers, actNumber }) {
   if (actNumber > lastActSeen) {
     const banner = document.createElement("div");
     banner.className = "log-act-banner";
@@ -152,7 +223,7 @@ function appendLogEntry({ turn, actionDef, exchangeGloss, responseGloss, trigger
   const entry = document.createElement("div");
   entry.className = "log-entry intent-" + (actionDef.category ?? "warm");
 
-  let html = `<div class="log-turn">Turn ${turn} · ${actionDef.label}</div>`;
+  let html = `<div class="log-turn">Turn ${turn} · ${initiatorName} → ${targetName} · ${actionDef.label}</div>`;
   if (exchangeGloss) html += `<div class="log-exchange">${exchangeGloss}</div>`;
   if (responseGloss) html += `<div class="log-response">${responseGloss}</div>`;
   for (const t of triggers ?? []) html += `<div class="log-trigger">→ ${t.gloss}</div>`;
@@ -163,50 +234,37 @@ function appendLogEntry({ turn, actionDef, exchangeGloss, responseGloss, trigger
 
 function showOutcome(outcome) {
   outcomeEl.hidden = false;
-  outcomeEl.className = "outcome " + outcome.kind;
-  let icon, title, body;
-  switch (outcome.kind) {
-    case "win-date":
-      icon = "🌟"; title = "You did it.";
-      body = `You and ${CHARACTER_DEFS[outcome.partner].name} are dating. The night ended exactly the way you hoped.`;
-      break;
-    case "win-friends":
-      icon = "💛"; title = "Good company.";
-      body = `Not a date — but you ended prom with real friends. That's not nothing.`;
-      break;
-    case "lose-pariah":
-      icon = "😶"; title = "Rough night.";
-      body = `Two enemies and not much else. You pushed too hard.`;
-      break;
-    default:
-      icon = "🤷"; title = "Just another night.";
-      body = `Prom came and went. Some moments stood out. Most didn't.`;
-  }
-
+  outcomeEl.className = "outcome " + (outcome.achieved ? "goal-won" : "goal-lost");
   const goal = game.getGoal();
-  const goalAchieved = goal.check(game.state, outcome);
-  const goalResultText = goalAchieved
-    ? goal.successText(game.state, outcome)
-    : goal.failText;
-  const goalResultClass = goalAchieved ? "goal-achieved" : "goal-failed";
-  const goalResultIcon  = goalAchieved ? "✓" : "✗";
+  const icon = outcome.achieved ? "🌟" : "🌧️";
+  const title = outcome.achieved ? "Goal achieved." : "Not quite.";
+  const body = outcome.achieved ? goal.successText() : goal.failText();
+
+  const stats = `
+    <div class="outcome-stats">
+      <span>${outcome.friendsPairs} friend pair${outcome.friendsPairs === 1 ? "" : "s"}</span>
+      <span>${outcome.datingPairs} dating</span>
+      <span>${outcome.enemiesPairs} enemy pair${outcome.enemiesPairs === 1 ? "" : "s"}</span>
+    </div>
+  `;
 
   outcomeEl.innerHTML = `
     <div class="outcome-icon">${icon}</div>
     <div class="outcome-title">${title}</div>
     <div class="outcome-body">${body}</div>
-    <div class="outcome-goal ${goalResultClass}">
-      <span class="outcome-goal-icon">${goalResultIcon}</span>
+    <div class="outcome-goal ${outcome.achieved ? "goal-achieved" : "goal-failed"}">
+      <span class="outcome-goal-icon">${outcome.achieved ? "✓" : "✗"}</span>
       <span class="outcome-goal-label">${goal.title}:</span>
-      ${goalResultText}
+      ${goal.hint}
     </div>
+    ${stats}
     <button id="outcome-replay">Play again</button>
   `;
   document.getElementById("outcome-replay").addEventListener("click", () => startGame());
 }
 
 async function handleAction(actionName) {
-  if (busy || !game || !selectedTarget) return;
+  if (busy || !game || !selectedInitiator || !selectedTarget) return;
   busy = true;
   setStatus("Thinking…");
   renderActions();
@@ -214,10 +272,14 @@ async function handleAction(actionName) {
   try {
     const actionDef = ACTION_CATALOG.find(a => a.name === actionName);
     const beforeState = game.getState();
-    const result = await game.takeTurn(actionName, selectedTarget);
+    const initiatorID = selectedInitiator;
+    const targetID    = selectedTarget;
+    const result = await game.takeTurn(actionName, initiatorID, targetID);
 
     appendLogEntry({
       turn:          beforeState.turn + 1,
+      initiatorName: CHARACTER_DEFS[initiatorID].name,
+      targetName:    CHARACTER_DEFS[targetID].name,
       actionDef,
       exchangeGloss: result.exchange?.gloss ?? null,
       responseGloss: result.response?.gloss ?? null,
@@ -231,7 +293,6 @@ async function handleAction(actionName) {
     const state = game.getState();
     renderActHeader(state.actNumber, state.turn);
     renderCast(state);
-    renderAlexStatuses(state);
     renderActions();
 
     if (result.outcome) showOutcome(result.outcome);
@@ -246,6 +307,7 @@ async function handleAction(actionName) {
 async function startGame() {
   outcomeEl.hidden = true;
   logEl.innerHTML = "";
+  selectedInitiator = null;
   selectedTarget = null;
   lastActSeen = 1;
   setStatus("Loading…");
@@ -258,18 +320,16 @@ async function startGame() {
     goalTitleEl.textContent  = goal.title;
     goalFlavorEl.textContent = goal.flavor;
     goalHintEl.textContent   = goal.hint;
-    goalSectionEl.className  = "goal-section";
 
     const state = game.getState();
     renderActHeader(state.actNumber, state.turn);
     renderCast(state);
-    renderAlexStatuses(state);
     renderActions();
 
     logEl.innerHTML = `<div class="log-intro">
       <strong>${startInfo.opening?.gloss ?? "The week before prom."}</strong>
       <br><br>
-      Pick someone, then pick a move. Only moves you're actually inclined to try right now will appear — the number on each button is how much you want it (utility score from the social state). Build friendships and romance over ${ACT1_TURNS} school turns, then ${ACT2_TURNS} more at the prom.
+      Click a character to be the <em>initiator</em>, then click another to be the <em>receiver</em>. The action menu shows what the initiator is willing to do toward that receiver right now (utility score on each button). You have ${ACT1_TURNS} school turns and ${ACT2_TURNS} prom turns to engineer the goal above.
     </div>`;
     setStatus("");
   } catch (err) {
@@ -282,6 +342,13 @@ async function init() {
   setStatus("Loading…");
   try {
     bundle = await fetch("./bundle.json").then(r => r.json());
+    clearSelectionEl.addEventListener("click", () => {
+      if (busy) return;
+      selectedInitiator = null;
+      selectedTarget = null;
+      renderCast(game.getState());
+      renderActions();
+    });
     await startGame();
   } catch (err) {
     setStatus(`Failed to load: ${err.message}`, true);

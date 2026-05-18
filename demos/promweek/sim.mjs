@@ -1,16 +1,18 @@
 // Promweek — two-act high school social physics with utility-scored action menus.
 //
-// All social effects, reactions, and trigger rules live in sim.viv. Each
-// concrete action is gated by a single condition: `~volition(...) > 0`.
-// The volition function (defined below) sums rule weights based on the
-// current social state — traits, networks, statuses, relationships, act —
-// and returns a score (or null when the action can't apply at all).
+// The player picks an initiator and a target from the full cast, then chooses
+// from the moves the initiator is willing to make. All social effects,
+// reactions, and trigger rules live in sim.viv. Each concrete action is gated
+// by a single condition: `~volition(...) > 0`. The volition function (below)
+// sums rule weights based on the current social state — traits, networks,
+// statuses, relationships, act — and returns a score (or null when the action
+// can't apply at all).
 //
-// The same function feeds the player's menu: for the selected target, the
-// host enumerates every concrete action, computes its volition, and shows
-// the ones with score > 0, sorted by score. The player picks a specific
-// Viv action; Viv evaluates the condition, fires the action, applies
-// effects, and queues the target's response plus the trigger rules.
+// The same function feeds the player's menu: for each (initiator, target)
+// pair the host enumerates every concrete action, computes its volition, and
+// shows the ones with score > 0, sorted by score. The player picks a specific
+// Viv action; Viv evaluates the condition, fires the action, applies effects,
+// and queues the target's response plus the trigger rules.
 
 function mulberry32(seed) {
   return () => {
@@ -45,81 +47,19 @@ const setIn = (obj, path, value) => {
   cur[parts[parts.length - 1]] = value;
 };
 
-// ── Player goals ────────────────────────────────────────────────────────────
-//
-// Five preauthored goals, one picked at random each run. Each goal has:
-//   check(state, outcome) → boolean  (evaluated at game end)
-//   successText(state, outcome) → string
-//   failText → string
-
-export const PLAYER_GOALS = [
-  {
-    id: "find-a-date",
-    title: "Find a Date",
-    flavor: "Prom without a date feels incomplete. Ask someone who matters — really ask them.",
-    hint: "Build romance and buddy high with one person, ask them out in Act 1, then keep the momentum at prom.",
-    check: (_state, outcome) => outcome?.kind === "win-date",
-    successText: (_state, outcome) =>
-      `You and ${CHARACTER_DEFS[outcome.partner].name} are going to prom together. Night saved.`,
-    failText: "Prom came and went solo. Romance takes more than good intentions.",
-  },
-  {
-    id: "crack-jordan",
-    title: "Crack Jordan",
-    flavor: "Jordan keeps everyone at arm's length. Most people give up. You're not most people.",
-    hint: "Jordan responds to sincerity, shared interests, and a good debate. Cheap flattery won't cut it.",
-    check: (state) => {
-      const rel = state.entities.alex?.relationships?.jordan;
-      return rel === "friends" || rel === "dating";
-    },
-    successText: () => "You got through to Jordan. That's genuinely hard to do.",
-    failText: "Jordan stayed guarded to the end. A different approach might have worked.",
-  },
-  {
-    id: "life-of-the-party",
-    title: "Life of the Party",
-    flavor: "Forget one perfect night — leave prom with everyone thinking you're the best person there.",
-    hint: "End prom as friends (or more) with at least 3 people. Not a single enemy.",
-    check: (state) => {
-      const rels = state.entities.alex?.relationships ?? {};
-      const friends = Object.values(rels).filter(v => v === "friends" || v === "dating").length;
-      const enemies = Object.values(rels).filter(v => v === "enemies").length;
-      return friends >= 3 && enemies === 0;
-    },
-    successText: () => "Three real connections, zero drama. You made everyone feel seen.",
-    failText: "Either short on friends or trailing enemies. The room-charming fell short.",
-  },
-  {
-    id: "grand-gesture",
-    title: "Grand Gesture",
-    flavor: "Prom is a once-in-a-lifetime stage. Step onto that dance floor and say it where everyone can hear.",
-    hint: "Use the Public Declaration action at prom — whatever happens next is beside the point.",
-    check: (state) =>
-      state.actions.some(id => state.entities[id]?.name === "public-declaration"),
-    successText: () =>
-      "You stepped up and said it in front of everyone. Whatever happened after — that took guts.",
-    failText: "The moment came. You didn't take it. The dance floor stayed empty.",
-  },
-  {
-    id: "stir-the-pot",
-    title: "Stir the Pot",
-    flavor: "Prom is theater. Play the villain for a bit — just don't let the curtain fall with you alone on stage.",
-    hint: "Spread at least one rumor in Act 1, but still leave prom with at least one friend.",
-    check: (state) => {
-      const rumorUsed = state.actions.some(id => state.entities[id]?.name === "spread-rumor");
-      const rels = state.entities.alex?.relationships ?? {};
-      const friends = Object.values(rels).filter(v => v === "friends" || v === "dating").length;
-      return rumorUsed && friends >= 1;
-    },
-    successText: () => "Drama started, friendships kept. That's a tricky balance.",
-    failText: "Either you played it safe, or the drama swallowed you whole.",
-  },
-];
+const shuffled = (rng, arr) => {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
 
 // ── Storyworld definitions ──────────────────────────────────────────────────
 
-export const ACT1_TURNS = 6;
-export const ACT2_TURNS = 4;
+export const ACT1_TURNS = 8;
+export const ACT2_TURNS = 5;
 
 export const ITEM_DEFS = {
   "scientific-calculator": { name: "scientific calculator", coolness: -30 },
@@ -220,8 +160,8 @@ export const ACTION_CATALOG = [
   // ── Act 1 ──
   { name: "small-talk",         label: "Make small talk",      desc: "Low-stakes chitchat. Always safe.",                   category: "warm",  act: 1 },
   { name: "compliment",         label: "Compliment them",      desc: "A light kindness.",                                   category: "warm",  act: 1 },
-  { name: "share-interest",     label: "Share an interest",    desc: "Talk about something you both like (cool).",          category: "warm",  act: 1 },
-  { name: "bond-over-lame",     label: "Bond over a lame thing", desc: "Geek out together over something everyone hates.",  category: "warm",  act: 1 },
+  { name: "share-interest",     label: "Share an interest",    desc: "Talk about something both like (cool).",              category: "warm",  act: 1 },
+  { name: "bond-over-lame",     label: "Bond over a lame thing", desc: "Geek out together over something everyone hates.", category: "warm",  act: 1 },
   { name: "sincere-compliment", label: "Compliment, sincerely",desc: "Something specific and true.",                        category: "mend",  act: 1 },
   { name: "flirt-soft",         label: "Flirt softly",         desc: "Test the water with a knowing look.",                 category: "spicy", act: 1 },
   { name: "flirt-bold",         label: "Flirt boldly",         desc: "Lean in. No subtlety.",                               category: "spicy", act: 1 },
@@ -260,25 +200,25 @@ export const CATEGORIES = [
 
 const VOLITION_RULES = {
   "small-talk": (a, o, s) => {
-    if (a.act !== "ACT_ONE") return null;
+    if (s.actNumber !== 1) return null;
     let v = 5;
-    if (o.tension?.[a.id] >= 20) v += 3;     // smooths things
+    if (o.tension?.[a.id] >= 20) v += 3;
     if (a.relationships?.[o.id] === "enemies") v -= 8;
     return v;
   },
 
   "compliment": (a, o, s) => {
-    if (a.act !== "ACT_ONE") return null;
+    if (s.actNumber !== 1) return null;
     let v = 4;
     if (a.traits.includes("charismatic")) v += 2;
-    if (o.traits.includes("vain"))         v += 3;  // loves it
-    if (o.tension?.[a.id] >= 15)            v += 3;  // smooth
+    if (o.traits.includes("vain"))         v += 3;
+    if (o.tension?.[a.id] >= 15)            v += 3;
     if (a.relationships?.[o.id] === "enemies") v -= 6;
     return v;
   },
 
   "share-interest": (a, o, s) => {
-    if (a.act !== "ACT_ONE") return null;
+    if (s.actNumber !== 1) return null;
     const shared = (a.likes ?? []).filter(id => (o.likes ?? []).includes(id));
     const coolShared = shared.filter(id => (s.entities[id]?.coolness ?? 0) >= 0);
     if (coolShared.length === 0) return null;
@@ -288,27 +228,27 @@ const VOLITION_RULES = {
   },
 
   "bond-over-lame": (a, o, s) => {
-    if (a.act !== "ACT_ONE") return null;
+    if (s.actNumber !== 1) return null;
     const shared = (a.likes ?? []).filter(id => (o.likes ?? []).includes(id));
     const lameShared = shared.filter(id => (s.entities[id]?.coolness ?? 0) < 0);
     if (lameShared.length === 0) return null;
     let v = 7 + lameShared.length * 3;
     if (a.traits.includes("authentic")) v += 3;
-    if (o.traits.includes("vain")) v -= 4;  // they care what people think
+    if (o.traits.includes("vain")) v -= 4;
     return v;
   },
 
   "sincere-compliment": (a, o, s) => {
-    if (a.act !== "ACT_ONE") return null;
+    if (s.actNumber !== 1) return null;
     let v = 4;
     if (o.tension?.[a.id] >= 10) v += 4;
     if (o.traits.includes("authentic")) v += 3;
-    if (o.traits.includes("guarded"))   v += 2;  // disarms
+    if (o.traits.includes("guarded"))   v += 2;
     return v;
   },
 
   "flirt-soft": (a, o, s) => {
-    if (a.act !== "ACT_ONE") return null;
+    if (s.actNumber !== 1) return null;
     if (a.relationships?.[o.id] === "enemies") return null;
     let v = 3;
     if ((a.romance?.[o.id] ?? 0) >= 8)  v += 4;
@@ -319,9 +259,9 @@ const VOLITION_RULES = {
   },
 
   "flirt-bold": (a, o, s) => {
-    if (a.act !== "ACT_ONE") return null;
+    if (s.actNumber !== 1) return null;
     if (a.relationships?.[o.id] === "enemies") return null;
-    if ((a.romance?.[o.id] ?? 0) < 10) return null;   // hard prereq
+    if ((a.romance?.[o.id] ?? 0) < 10) return null;
     let v = 4;
     if ((o.romance?.[a.id] ?? 0) >= 20) v += 8;
     if (a.traits.includes("charismatic")) v += 3;
@@ -332,7 +272,7 @@ const VOLITION_RULES = {
   },
 
   "confide-secret": (a, o, s) => {
-    if (a.act !== "ACT_ONE") return null;
+    if (s.actNumber !== 1) return null;
     if ((a.buddy?.[o.id] ?? 0) < 20) return null;
     let v = 5;
     if ((o.buddy?.[a.id] ?? 0) >= 30) v += 5;
@@ -343,7 +283,7 @@ const VOLITION_RULES = {
   },
 
   "ask-out": (a, o, s) => {
-    if (a.act !== "ACT_ONE") return null;
+    if (s.actNumber !== 1) return null;
     if ((a.romance?.[o.id] ?? 0) < 25) return null;
     if ((a.buddy?.[o.id]   ?? 0) < 25) return null;
     let v = 6;
@@ -355,7 +295,7 @@ const VOLITION_RULES = {
   },
 
   "debate-target": (a, o, s) => {
-    if (a.act !== "ACT_ONE") return null;
+    if (s.actNumber !== 1) return null;
     let v = 4;
     if (a.traits.includes("intellectual")) v += 4;
     if (o.traits.includes("intellectual")) v += 4;
@@ -365,7 +305,7 @@ const VOLITION_RULES = {
   },
 
   "confront": (a, o, s) => {
-    if (a.act !== "ACT_ONE") return null;
+    if (s.actNumber !== 1) return null;
     const tens = a.tension?.[o.id] ?? 0;
     if (tens < 15) return null;
     let v = 3 + Math.floor(tens / 4);
@@ -375,7 +315,7 @@ const VOLITION_RULES = {
   },
 
   "spread-rumor": (a, o, s) => {
-    if (a.act !== "ACT_ONE") return null;
+    if (s.actNumber !== 1) return null;
     if (a.relationships?.[o.id] === "friends") return null;
     if (a.relationships?.[o.id] === "dating")  return null;
     let v = -2;
@@ -387,7 +327,7 @@ const VOLITION_RULES = {
   },
 
   "apologize-deep": (a, o, s) => {
-    if (a.act !== "ACT_ONE") return null;
+    if (s.actNumber !== 1) return null;
     if ((o.tension?.[a.id] ?? 0) < 20) return null;
     let v = 6 + Math.floor((o.tension?.[a.id] ?? 0) / 8);
     if (a.traits.includes("helpful")) v += 2;
@@ -398,14 +338,14 @@ const VOLITION_RULES = {
   // ── Act 2 ──
 
   "chat-prom": (a, o, s) => {
-    if (a.act !== "ACT_TWO") return null;
+    if (s.actNumber !== 2) return null;
     let v = 4;
     if (a.relationships?.[o.id] === "enemies") v -= 6;
     return v;
   },
 
   "ask-to-dance": (a, o, s) => {
-    if (a.act !== "ACT_TWO") return null;
+    if (s.actNumber !== 2) return null;
     let v = 3;
     if ((a.buddy?.[o.id] ?? 0) >= 30) v += 5;
     if (a.relationships?.[o.id] === "friends") v += 5;
@@ -416,7 +356,7 @@ const VOLITION_RULES = {
   },
 
   "slow-dance": (a, o, s) => {
-    if (a.act !== "ACT_TWO") return null;
+    if (s.actNumber !== 2) return null;
     if (a.relationships?.[o.id] !== "dating"
         && ((a.romance?.[o.id] ?? 0) < 30 || (o.romance?.[a.id] ?? 0) < 25)) return null;
     let v = 8;
@@ -426,7 +366,7 @@ const VOLITION_RULES = {
   },
 
   "prom-confess": (a, o, s) => {
-    if (a.act !== "ACT_TWO") return null;
+    if (s.actNumber !== 2) return null;
     if ((a.romance?.[o.id] ?? 0) < 20) return null;
     let v = 5;
     if ((o.romance?.[a.id] ?? 0) >= 30) v += 10;
@@ -436,7 +376,7 @@ const VOLITION_RULES = {
   },
 
   "public-declaration": (a, o, s) => {
-    if (a.act !== "ACT_TWO") return null;
+    if (s.actNumber !== 2) return null;
     if ((a.romance?.[o.id] ?? 0) < 40) return null;
     let v = 4;
     if ((o.romance?.[a.id] ?? 0) >= 50) v += 12;
@@ -453,8 +393,165 @@ function computeVolition(state, actorID, otherID, actionName) {
   const a = state.entities[actorID];
   const o = state.entities[otherID];
   const rule = VOLITION_RULES[actionName];
-  if (!a || !o || !rule) return null;
+  if (!a || !o || actorID === otherID || !rule) return null;
   return rule(a, o, state);
+}
+
+// ── Player goals ────────────────────────────────────────────────────────────
+//
+// Goals describe states between characters, not Alex-specific outcomes. Each
+// template generates a concrete goal at game-init time by sampling random
+// characters from the cast.
+
+const CHARACTER_IDS = Object.keys(CHARACTER_DEFS);
+
+function relationOf(state, a, b) {
+  return state.entities[a]?.relationships?.[b];
+}
+
+function arePair(state, a, b, kind) {
+  return relationOf(state, a, b) === kind && relationOf(state, b, a) === kind;
+}
+
+function friendsCountFor(state, id) {
+  const rels = state.entities[id]?.relationships ?? {};
+  return Object.values(rels).filter(v => v === "friends" || v === "dating").length;
+}
+
+function allPairs() {
+  const pairs = [];
+  for (let i = 0; i < CHARACTER_IDS.length; i++) {
+    for (let j = i + 1; j < CHARACTER_IDS.length; j++) {
+      pairs.push([CHARACTER_IDS[i], CHARACTER_IDS[j]]);
+    }
+  }
+  return pairs;
+}
+
+function countPairsOfKind(state, kind) {
+  let n = 0;
+  for (const [a, b] of allPairs()) if (arePair(state, a, b, kind)) n++;
+  return n;
+}
+
+const GOAL_TEMPLATES = [
+  {
+    id: "matchmaker",
+    title: "Matchmaker",
+    setup: (rng) => {
+      const [x, y] = shuffled(rng, CHARACTER_IDS).slice(0, 2);
+      return { x, y };
+    },
+    flavor: ({ x, y }) =>
+      `${CHARACTER_DEFS[x].name} and ${CHARACTER_DEFS[y].name} would make a perfect couple. Make it happen — before the night is over.`,
+    hint:   ({ x, y }) =>
+      `Get ${CHARACTER_DEFS[x].name} and ${CHARACTER_DEFS[y].name} to start dating.`,
+    check:  (state, g) => arePair(state, g.x, g.y, "dating"),
+    successText: (g) =>
+      `${CHARACTER_DEFS[g.x].name} and ${CHARACTER_DEFS[g.y].name} are official. Cupid bowed.`,
+    failText:    (g) =>
+      `${CHARACTER_DEFS[g.x].name} and ${CHARACTER_DEFS[g.y].name} never quite clicked.`,
+  },
+  {
+    id: "stir-rivalry",
+    title: "Stir a Rivalry",
+    setup: (rng) => {
+      const [x, y] = shuffled(rng, CHARACTER_IDS).slice(0, 2);
+      return { x, y };
+    },
+    flavor: ({ x, y }) =>
+      `${CHARACTER_DEFS[x].name} and ${CHARACTER_DEFS[y].name} are too polite about each other. Push the cracks open.`,
+    hint:   ({ x, y }) =>
+      `Get ${CHARACTER_DEFS[x].name} and ${CHARACTER_DEFS[y].name} to become enemies.`,
+    check:  (state, g) => arePair(state, g.x, g.y, "enemies"),
+    successText: (g) =>
+      `${CHARACTER_DEFS[g.x].name} and ${CHARACTER_DEFS[g.y].name} are openly at war. Drama achieved.`,
+    failText:    (g) =>
+      `${CHARACTER_DEFS[g.x].name} and ${CHARACTER_DEFS[g.y].name} kept things civil. Boring.`,
+  },
+  {
+    id: "befriend-loner",
+    title: "Bring Them Out",
+    setup: (rng) => {
+      const x = shuffled(rng, CHARACTER_IDS)[0];
+      return { x };
+    },
+    flavor: ({ x }) =>
+      `${CHARACTER_DEFS[x].name} doesn't have anyone yet. Get them in someone's circle — anyone's — before prom.`,
+    hint:   ({ x }) =>
+      `End with ${CHARACTER_DEFS[x].name} as friends (or dating) with at least 2 others.`,
+    check:  (state, g) => friendsCountFor(state, g.x) >= 2,
+    successText: (g) =>
+      `${CHARACTER_DEFS[g.x].name} has a real circle now. Quietly, that's a big deal.`,
+    failText:    (g) =>
+      `${CHARACTER_DEFS[g.x].name} ended the night still on the outside.`,
+  },
+  {
+    id: "secret-crush",
+    title: "Plant a Crush",
+    setup: (rng) => {
+      const [x, y] = shuffled(rng, CHARACTER_IDS).slice(0, 2);
+      return { x, y };
+    },
+    flavor: ({ x, y }) =>
+      `${CHARACTER_DEFS[x].name} doesn't even know it yet. Get them falling for ${CHARACTER_DEFS[y].name} — they don't have to act on it.`,
+    hint:   ({ x, y }) =>
+      `Get ${CHARACTER_DEFS[x].name} to have a crush on ${CHARACTER_DEFS[y].name}.`,
+    check:  (state, g) =>
+      state.entities[g.x]?.statuses?.crush?.[g.y] === true,
+    successText: (g) =>
+      `${CHARACTER_DEFS[g.x].name} is gone on ${CHARACTER_DEFS[g.y].name}. Everyone watching can tell.`,
+    failText:    (g) =>
+      `${CHARACTER_DEFS[g.x].name} stayed unaffected. Romance never sparked.`,
+  },
+  {
+    id: "peaceful-prom",
+    title: "Peaceful Prom",
+    setup: () => ({}),
+    flavor: () =>
+      `The cast is one rumor away from open war. Keep it civil — leave prom with at least two friendships and no enemies.`,
+    hint:   () =>
+      `End with at least 2 pairs as friends/dating and zero enemy pairs anywhere in the cast.`,
+    check:  (state) =>
+      countPairsOfKind(state, "enemies") === 0
+      && (countPairsOfKind(state, "friends") + countPairsOfKind(state, "dating")) >= 2,
+    successText: () => `Two real bonds, no enemies. Northside High made it through intact.`,
+    failText:    () => `Either too thin on friendships, or too rich in enemies.`,
+  },
+  {
+    id: "love-triangle",
+    title: "Tangle Them Up",
+    setup: (rng) => {
+      const [x, y, z] = shuffled(rng, CHARACTER_IDS).slice(0, 3);
+      return { x, y, z };
+    },
+    flavor: ({ x, y, z }) =>
+      `${CHARACTER_DEFS[x].name} sees both ${CHARACTER_DEFS[y].name} and ${CHARACTER_DEFS[z].name}. Make it true.`,
+    hint:   ({ x, y, z }) =>
+      `Get ${CHARACTER_DEFS[x].name} to have crushes on both ${CHARACTER_DEFS[y].name} and ${CHARACTER_DEFS[z].name}.`,
+    check:  (state, g) =>
+      state.entities[g.x]?.statuses?.crush?.[g.y] === true
+      && state.entities[g.x]?.statuses?.crush?.[g.z] === true,
+    successText: (g) =>
+      `${CHARACTER_DEFS[g.x].name} is torn between ${CHARACTER_DEFS[g.y].name} and ${CHARACTER_DEFS[g.z].name}. Beautiful mess.`,
+    failText:    (g) =>
+      `${CHARACTER_DEFS[g.x].name} never quite fell for both. The triangle never closed.`,
+  },
+];
+
+function buildGoal(rng) {
+  const template = GOAL_TEMPLATES[Math.floor(rng() * GOAL_TEMPLATES.length)];
+  const data = template.setup(rng) ?? {};
+  return {
+    id: template.id,
+    title: template.title,
+    flavor: template.flavor(data),
+    hint:   template.hint(data),
+    check:  (state) => template.check(state, data),
+    successText: () => template.successText(data),
+    failText:    () => template.failText(data),
+    data,
+  };
 }
 
 // ── Initial state ───────────────────────────────────────────────────────────
@@ -506,7 +603,6 @@ function buildInitialState(EntityType) {
       relationships: { ...(INITIAL_RELATIONSHIPS[id] ?? {}) },
       statuses: { popular: false, embarrassed: false, crush: {} },
       buddy, romance, cool, tension,
-      act: null,
     };
     characters.push(id);
   }
@@ -552,22 +648,33 @@ export async function runSim(runtime, bundle, seedStr, tickCount) {
   for (let i = 0; i < tickCount; i++) {
     if (game.getState().outcome) break;
 
-    const targets = game.getCandidateTargets();
-    const target = targets[Math.floor(rng() * targets.length)];
-    const available = game.getAvailableActions(target);
-    if (available.length === 0) {
-      ticks.push({ index: i, timestamp: i + 1, events: [{ text: `(no moves available toward ${target})`, type: "skip" }], relationship: game.getSnapshot(target), actNumber: game.getState().actNumber });
-      // Force end-of-turn anyway so we don't infinite-loop in Node.
+    const characters = game.getCandidateInitiators();
+    let chosen = null;
+    for (const initiatorID of shuffled(rng, characters)) {
+      const targets = game.getCandidateTargets(initiatorID);
+      for (const targetID of shuffled(rng, targets)) {
+        const available = game.getAvailableActions(initiatorID, targetID);
+        if (available.length > 0) {
+          const top = available.slice(0, Math.max(1, Math.ceil(available.length / 2)));
+          chosen = { initiatorID, targetID, action: top[Math.floor(rng() * top.length)] };
+          break;
+        }
+      }
+      if (chosen) break;
+    }
+
+    if (!chosen) {
+      ticks.push({ index: i, timestamp: i + 1, events: [{ text: `(no moves available in the room)`, type: "skip" }], pair: null, actNumber: game.getState().actNumber });
       await game.skipTurn();
       continue;
     }
-    // Weighted-ish: pick from top half by volition for more interesting runs.
-    const top = available.slice(0, Math.max(1, Math.ceil(available.length / 2)));
-    const action = top[Math.floor(rng() * top.length)];
 
-    const result = await game.takeTurn(action.name, target);
+    const result = await game.takeTurn(chosen.action.name, chosen.initiatorID, chosen.targetID);
     const events = [];
-    events.push({ text: `${action.label} → ${result.exchange?.gloss ?? "(?)"}`, type: "intent" });
+    events.push({
+      text: `${CHARACTER_DEFS[chosen.initiatorID].name} → ${CHARACTER_DEFS[chosen.targetID].name}: ${chosen.action.label} → ${result.exchange?.gloss ?? "(?)"}`,
+      type: "intent",
+    });
     if (result.response) events.push({ text: result.response.gloss, type: "response" });
     for (const t of result.triggers ?? []) events.push({ text: t.gloss, type: "trigger" });
 
@@ -575,7 +682,8 @@ export async function runSim(runtime, bundle, seedStr, tickCount) {
       index: i,
       timestamp: i + 1,
       events,
-      relationship: result.snapshot,
+      pair: { initiator: chosen.initiatorID, target: chosen.targetID },
+      snapshot: result.snapshot,
       gameOutcome: result.outcome,
       actNumber: result.actNumber,
     });
@@ -586,68 +694,77 @@ export async function runSim(runtime, bundle, seedStr, tickCount) {
 }
 
 export function summarize(tick) {
-  const s = tick.relationship;
+  const s = tick.snapshot;
   const o = tick.gameOutcome;
   const end = o ? ` → ${o.kind}${o.partner ? `(${o.partner})` : ""}` : "";
+  if (!s) return `act${tick.actNumber} (skip)${end}`;
   const rels = Object.entries(s.relationships).filter(([_, v]) => v != null)
     .map(([k, v]) => `${k}:${v}`).join(" ");
-  return `act${tick.actNumber} alex→${s.focus}{b:${s.focusBuddy} r:${s.focusRomance} t:${s.focusTension}} rels:[${rels}]${end}`;
+  return `act${tick.actNumber} ${s.from}→${s.to}{b:${s.buddy} r:${s.romance} t:${s.tension}} rels:[${rels}]${end}`;
 }
 
 // ── Display + outcome helpers ───────────────────────────────────────────────
 
-export function getSnapshot(state, focusID) {
-  const alex = state.entities.alex;
-  const focus = focusID ?? Object.keys(CHARACTER_DEFS).find(id => id !== "alex");
+export function getSnapshot(state, fromID, toID) {
+  const from = state.entities[fromID];
+  if (!from || !toID) return null;
   return {
-    focus,
-    focusBuddy:    alex.buddy[focus]   ?? 0,
-    focusRomance:  alex.romance[focus] ?? 0,
-    focusCool:     alex.cool[focus]    ?? 0,
-    focusTension:  alex.tension[focus] ?? 0,
-    relationships: { ...alex.relationships },
-    crushes:       { ...(alex.statuses?.crush ?? {}) },
-    popular:       alex.statuses?.popular ?? false,
+    from: fromID,
+    to:   toID,
+    buddy:   from.buddy[toID]   ?? 0,
+    romance: from.romance[toID] ?? 0,
+    cool:    from.cool[toID]    ?? 0,
+    tension: from.tension[toID] ?? 0,
+    relationships: { ...from.relationships },
+    crushes:       { ...(from.statuses?.crush ?? {}) },
   };
 }
 
-export function checkOutcome(state) {
-  if (state.actNumber < 2) return null;
-  if (state.turn < ACT1_TURNS + ACT2_TURNS) return null;
-  const alex = state.entities.alex;
-  const datingPartner = Object.entries(alex.relationships).find(([_, v]) => v === "dating");
-  const friends = Object.entries(alex.relationships).filter(([_, v]) => v === "friends").map(([k]) => k);
-  const enemies = Object.entries(alex.relationships).filter(([_, v]) => v === "enemies").map(([k]) => k);
-  if (datingPartner) return { kind: "win-date", partner: datingPartner[0], friends, enemies };
-  if (friends.length >= 3) return { kind: "win-friends", friends, enemies };
-  if (enemies.length >= 2) return { kind: "lose-pariah", friends, enemies };
-  return { kind: "neutral", friends, enemies };
+export function getRelationshipKind(state, a, b) {
+  const ab = relationOf(state, a, b);
+  const ba = relationOf(state, b, a);
+  if (ab === "dating"  && ba === "dating")  return "dating";
+  if (ab === "enemies" || ba === "enemies") return "enemies";
+  if (ab === "friends" && ba === "friends") return "friends";
+  return null;
 }
 
-export function getCharacterVibe(state, otherID) {
-  const alex = state.entities.alex;
-  const buddy   = alex.buddy[otherID]   ?? 0;
-  const romance = alex.romance[otherID] ?? 0;
-  const tension = alex.tension[otherID] ?? 0;
-  const rel = alex.relationships[otherID];
-  if (rel === "dating")  return { label: "Dating",       cls: "rel-dating"  };
-  if (rel === "enemies") return { label: "Enemies",      cls: "rel-enemies" };
-  if (rel === "friends") {
-    if (romance >= 40) return { label: "Friends, sparking", cls: "rel-friends-spark" };
-    return { label: "Friends",       cls: "rel-friends" };
-  }
+export function checkOutcome(state, goal) {
+  if (state.actNumber < 2) return null;
+  if (state.turn < ACT1_TURNS + ACT2_TURNS) return null;
+  const achieved = !!(goal && goal.check(state));
+  return {
+    kind: achieved ? "goal-won" : "goal-lost",
+    achieved,
+    friendsPairs: countPairsOfKind(state, "friends"),
+    datingPairs:  countPairsOfKind(state, "dating"),
+    enemiesPairs: countPairsOfKind(state, "enemies"),
+  };
+}
+
+export function getPairVibe(state, a, b) {
+  const rel = getRelationshipKind(state, a, b);
+  if (rel === "dating")  return { label: "Dating",   cls: "rel-dating"  };
+  if (rel === "enemies") return { label: "Enemies",  cls: "rel-enemies" };
+  if (rel === "friends") return { label: "Friends",  cls: "rel-friends" };
+  const ea = state.entities[a];
+  const eb = state.entities[b];
+  if (!ea || !eb) return { label: "—", cls: "rel-neutral" };
+  const romance = Math.max(ea.romance?.[b] ?? 0, eb.romance?.[a] ?? 0);
+  const tension = Math.max(ea.tension?.[b] ?? 0, eb.tension?.[a] ?? 0);
+  const buddy   = Math.max(ea.buddy?.[b]   ?? 0, eb.buddy?.[a]   ?? 0);
   if (tension >= 30) return { label: "Tense",            cls: "rel-tense" };
   if (romance >= 30) return { label: "Something there?", cls: "rel-spark" };
   if (buddy   >= 30) return { label: "Warming up",       cls: "rel-warm" };
-  if (buddy   <= 5)  return { label: "Barely acquainted", cls: "rel-cold" };
-  return                       { label: "Classmates",     cls: "rel-neutral" };
+  if (buddy   <= 5 && tension < 5 && romance < 5) return { label: "Barely acquainted", cls: "rel-cold" };
+  return                       { label: "Acquaintances", cls: "rel-neutral" };
 }
 
 // ── The Viv-backed game ─────────────────────────────────────────────────────
 
 export function initGame({ initializeVivRuntime, attemptAction, selectAction, EntityType }, bundle) {
   const rng = mulberry32(hashSeed(`promweek-${Date.now()}-${Math.random()}`));
-  const goal = PLAYER_GOALS[Math.floor(rng() * PLAYER_GOALS.length)];
+  const goal = buildGoal(rng);
   const state = buildInitialState(EntityType);
 
   const adapter = {
@@ -712,12 +829,12 @@ export function initGame({ initializeVivRuntime, attemptAction, selectAction, En
     return collected;
   }
 
-  async function fireScene(actionName, initiatorID = "alex") {
+  async function fireScene(actionName, initiatorID) {
     const before = snapshotActions();
     await attemptAction({
       actionName,
       initiatorID,
-      precastBindings: { alex: [initiatorID] },
+      precastBindings: { initiator: [initiatorID] },
       suppressConditions: true,
     });
     return newActionsSince(before);
@@ -728,11 +845,11 @@ export function initGame({ initializeVivRuntime, attemptAction, selectAction, En
     for (const iid of state.items)      state.entities[iid].location = locationID;
   }
 
-  function listAvailableActions(targetID) {
-    if (!targetID || targetID === "alex") return [];
+  function listAvailableActions(initiatorID, targetID) {
+    if (!initiatorID || !targetID || initiatorID === targetID) return [];
     const out = [];
     for (const def of ACTION_CATALOG) {
-      const v = computeVolition(state, "alex", targetID, def.name);
+      const v = computeVolition(state, initiatorID, targetID, def.name);
       if (v == null || v <= 0) continue;
       out.push({ ...def, volition: v });
     }
@@ -742,7 +859,7 @@ export function initGame({ initializeVivRuntime, attemptAction, selectAction, En
 
   async function advanceActIfNeeded() {
     if (state.actNumber === 1 && state.turn >= ACT1_TURNS) {
-      await fireScene("act2-opens", "alex");
+      await fireScene("act2-opens", state.characters[0]);
       moveAllTo("prom");
       state.actNumber = 2;
     }
@@ -754,7 +871,7 @@ export function initGame({ initializeVivRuntime, attemptAction, selectAction, En
     getGoal() { return goal; },
 
     async start() {
-      const opening = await fireScene("act1-opens", "alex");
+      const opening = await fireScene("act1-opens", state.characters[0]);
       return { opening: opening[0] ?? null, actNumber: state.actNumber, turn: state.turn };
     },
 
@@ -762,51 +879,54 @@ export function initGame({ initializeVivRuntime, attemptAction, selectAction, En
       return {
         turn: state.turn,
         actNumber: state.actNumber,
-        outcome: checkOutcome(state),
-        characters: state.characters.filter(id => id !== "alex").map(id => ({
+        outcome: checkOutcome(state, goal),
+        characters: state.characters.map(id => ({
           id,
           name: state.entities[id].name,
           portrait: CHARACTER_DEFS[id].portrait,
           traits: state.entities[id].traits,
-          vibe: getCharacterVibe(state, id),
+          relationships: { ...state.entities[id].relationships },
+          crushes: { ...(state.entities[id].statuses?.crush ?? {}) },
         })),
-        alexStatuses: { ...state.entities.alex.statuses },
       };
     },
 
-    getCandidateTargets() {
-      return state.characters.filter(id => id !== "alex");
+    getCandidateInitiators() {
+      return [...state.characters];
     },
 
-    getAvailableActions(targetID) {
-      return listAvailableActions(targetID);
+    getCandidateTargets(initiatorID) {
+      return state.characters.filter(id => id !== initiatorID);
     },
 
-    getSnapshot(focusID) { return getSnapshot(state, focusID); },
-    getCharacter(id)     { return state.entities[id]; },
+    getAvailableActions(initiatorID, targetID) {
+      return listAvailableActions(initiatorID, targetID);
+    },
 
-    async takeTurn(actionName, targetID) {
-      if (!state.entities[targetID] || targetID === "alex") {
-        throw new Error(`Invalid target: ${targetID}`);
-      }
-      if (!VOLITION_RULES[actionName]) {
-        throw new Error(`Unknown action: ${actionName}`);
-      }
+    getSnapshot(fromID, toID) { return getSnapshot(state, fromID, toID); },
+    getPairVibe(a, b)          { return getPairVibe(state, a, b); },
+    getCharacter(id)           { return state.entities[id]; },
+
+    async takeTurn(actionName, initiatorID, targetID) {
+      if (!state.entities[initiatorID]) throw new Error(`Invalid initiator: ${initiatorID}`);
+      if (!state.entities[targetID])    throw new Error(`Invalid target: ${targetID}`);
+      if (initiatorID === targetID)     throw new Error(`Initiator and target must differ`);
+      if (!VOLITION_RULES[actionName])  throw new Error(`Unknown action: ${actionName}`);
 
       const before = snapshotActions();
       await attemptAction({
         actionName,
-        initiatorID: "alex",
-        precastBindings: { alex: ["alex"], target: [targetID] },
+        initiatorID,
+        precastBindings: { initiator: [initiatorID], target: [targetID] },
       });
       const intentActions = newActionsSince(before);
       if (intentActions.length === 0) {
         throw new Error(`Action "${actionName}" blocked by Viv conditions (volition <= 0?).`);
       }
 
-      await drainUrgent("alex");
+      await drainUrgent(initiatorID);
       await drainUrgent(targetID);
-      await drainUrgent("alex");
+      await drainUrgent(initiatorID);
       clampNetworks(state);
 
       state.timestamp += 10;
@@ -823,18 +943,17 @@ export function initGame({ initializeVivRuntime, attemptAction, selectAction, En
         exchange,
         response,
         triggers,
-        snapshot: getSnapshot(state, targetID),
+        snapshot: getSnapshot(state, initiatorID, targetID),
         actNumber: state.actNumber,
-        outcome: checkOutcome(state),
+        outcome: checkOutcome(state, goal),
       };
     },
 
-    // Used by the headless runner when no action is available for a target.
     async skipTurn() {
       state.timestamp += 10;
       state.turn += 1;
       await advanceActIfNeeded();
-      return { actNumber: state.actNumber, outcome: checkOutcome(state) };
+      return { actNumber: state.actNumber, outcome: checkOutcome(state, goal) };
     },
   };
 }
