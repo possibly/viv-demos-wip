@@ -177,6 +177,59 @@ main {
 }
 .status-pill.popular { background: var(--success-lt); color: var(--success); }
 
+/* ── Goal card ───────────────────────────────────────────────────────────── */
+.goal-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 0.9rem 1.1rem;
+  display: flex;
+  gap: 0.9rem;
+  align-items: flex-start;
+}
+
+.goal-badge {
+  flex-shrink: 0;
+  font-family: system-ui, sans-serif;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  margin-top: 0.15rem;
+  white-space: nowrap;
+}
+
+.goal-content { flex: 1; }
+
+.goal-title {
+  font-size: 1rem;
+  font-weight: bold;
+  letter-spacing: -0.01em;
+}
+
+.goal-flavor {
+  font-size: 0.88rem;
+  font-style: italic;
+  color: var(--muted);
+  margin-top: 0.2rem;
+}
+
+.goal-hint {
+  font-family: system-ui, sans-serif;
+  font-size: 0.76rem;
+  color: var(--muted);
+  margin-top: 0.4rem;
+  padding: 0.2rem 0.55rem;
+  background: var(--bg);
+  border-radius: 6px;
+  border-left: 3px solid var(--border);
+}
+
 /* ── Cast grid ───────────────────────────────────────────────────────────── */
 .cast {
   background: var(--surface);
@@ -617,6 +670,23 @@ main {
   color: var(--muted);
   max-width: 380px;
 }
+
+.outcome-goal {
+  font-family: system-ui, sans-serif;
+  font-size: 0.9rem;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  max-width: 380px;
+  text-align: left;
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+.outcome-goal.goal-achieved { background: var(--success-lt); color: var(--success); }
+.outcome-goal.goal-failed   { background: rgba(0,0,0,0.08);  color: var(--muted); }
+
+.outcome-goal-icon { font-weight: 700; flex-shrink: 0; }
+.outcome-goal-label { font-weight: 600; flex-shrink: 0; }
 
 .outcome button {
   margin-top: 0.5rem;

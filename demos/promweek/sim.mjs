@@ -45,6 +45,77 @@ const setIn = (obj, path, value) => {
   cur[parts[parts.length - 1]] = value;
 };
 
+// ── Player goals ────────────────────────────────────────────────────────────
+//
+// Five preauthored goals, one picked at random each run. Each goal has:
+//   check(state, outcome) → boolean  (evaluated at game end)
+//   successText(state, outcome) → string
+//   failText → string
+
+export const PLAYER_GOALS = [
+  {
+    id: "find-a-date",
+    title: "Find a Date",
+    flavor: "Prom without a date feels incomplete. Ask someone who matters — really ask them.",
+    hint: "Build romance and buddy high with one person, ask them out in Act 1, then keep the momentum at prom.",
+    check: (_state, outcome) => outcome?.kind === "win-date",
+    successText: (_state, outcome) =>
+      `You and ${CHARACTER_DEFS[outcome.partner].name} are going to prom together. Night saved.`,
+    failText: "Prom came and went solo. Romance takes more than good intentions.",
+  },
+  {
+    id: "crack-jordan",
+    title: "Crack Jordan",
+    flavor: "Jordan keeps everyone at arm's length. Most people give up. You're not most people.",
+    hint: "Jordan responds to sincerity, shared interests, and a good debate. Cheap flattery won't cut it.",
+    check: (state) => {
+      const rel = state.entities.alex?.relationships?.jordan;
+      return rel === "friends" || rel === "dating";
+    },
+    successText: () => "You got through to Jordan. That's genuinely hard to do.",
+    failText: "Jordan stayed guarded to the end. A different approach might have worked.",
+  },
+  {
+    id: "life-of-the-party",
+    title: "Life of the Party",
+    flavor: "Forget one perfect night — leave prom with everyone thinking you're the best person there.",
+    hint: "End prom as friends (or more) with at least 3 people. Not a single enemy.",
+    check: (state) => {
+      const rels = state.entities.alex?.relationships ?? {};
+      const friends = Object.values(rels).filter(v => v === "friends" || v === "dating").length;
+      const enemies = Object.values(rels).filter(v => v === "enemies").length;
+      return friends >= 3 && enemies === 0;
+    },
+    successText: () => "Three real connections, zero drama. You made everyone feel seen.",
+    failText: "Either short on friends or trailing enemies. The room-charming fell short.",
+  },
+  {
+    id: "grand-gesture",
+    title: "Grand Gesture",
+    flavor: "Prom is a once-in-a-lifetime stage. Step onto that dance floor and say it where everyone can hear.",
+    hint: "Use the Public Declaration action at prom — whatever happens next is beside the point.",
+    check: (state) =>
+      state.actions.some(id => state.entities[id]?.name === "public-declaration"),
+    successText: () =>
+      "You stepped up and said it in front of everyone. Whatever happened after — that took guts.",
+    failText: "The moment came. You didn't take it. The dance floor stayed empty.",
+  },
+  {
+    id: "stir-the-pot",
+    title: "Stir the Pot",
+    flavor: "Prom is theater. Play the villain for a bit — just don't let the curtain fall with you alone on stage.",
+    hint: "Spread at least one rumor in Act 1, but still leave prom with at least one friend.",
+    check: (state) => {
+      const rumorUsed = state.actions.some(id => state.entities[id]?.name === "spread-rumor");
+      const rels = state.entities.alex?.relationships ?? {};
+      const friends = Object.values(rels).filter(v => v === "friends" || v === "dating").length;
+      return rumorUsed && friends >= 1;
+    },
+    successText: () => "Drama started, friendships kept. That's a tricky balance.",
+    failText: "Either you played it safe, or the drama swallowed you whole.",
+  },
+];
+
 // ── Storyworld definitions ──────────────────────────────────────────────────
 
 export const ACT1_TURNS = 6;
@@ -576,6 +647,7 @@ export function getCharacterVibe(state, otherID) {
 
 export function initGame({ initializeVivRuntime, attemptAction, selectAction, EntityType }, bundle) {
   const rng = mulberry32(hashSeed(`promweek-${Date.now()}-${Math.random()}`));
+  const goal = PLAYER_GOALS[Math.floor(rng() * PLAYER_GOALS.length)];
   const state = buildInitialState(EntityType);
 
   const adapter = {
@@ -678,6 +750,8 @@ export function initGame({ initializeVivRuntime, attemptAction, selectAction, En
 
   return {
     state,
+
+    getGoal() { return goal; },
 
     async start() {
       const opening = await fireScene("act1-opens", "alex");
