@@ -214,8 +214,12 @@ main {
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, transform 0.1s, box-shadow 0.15s;
   gap: 0.35rem;
+  text-align: left;
+  font: inherit;
+  color: inherit;
 }
-.cast-card:hover { background: var(--surface); transform: translateY(-1px); }
+.cast-card:not(:disabled):hover { background: var(--surface); transform: translateY(-1px); }
+.cast-card:disabled { cursor: default; opacity: 0.7; }
 .cast-card.selected {
   background: var(--accent-lt);
   border-color: var(--accent);
@@ -396,6 +400,87 @@ main {
   letter-spacing: 0;
   color: var(--muted);
   font-style: italic;
+}
+
+.action-list { padding: 0.8rem; display: flex; flex-direction: column; gap: 0.9rem; }
+
+.action-empty {
+  font-family: system-ui, sans-serif;
+  font-size: 0.88rem;
+  color: var(--muted);
+  font-style: italic;
+  text-align: center;
+  padding: 1.2rem 0.6rem;
+}
+
+.action-group { display: flex; flex-direction: column; gap: 0.4rem; }
+
+.action-group-label {
+  font-family: system-ui, sans-serif;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  padding: 0 0.25rem;
+}
+.action-group-warm  .action-group-label { color: var(--warm); }
+.action-group-spicy .action-group-label { color: var(--spicy); }
+.action-group-bold  .action-group-label { color: var(--bold); }
+.action-group-mend  .action-group-label { color: var(--mend); }
+.action-group-prom  .action-group-label { color: #6a2890; }
+
+.action-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
+  gap: 0.5rem;
+}
+
+.action-btn {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.action-btn:not(:disabled):hover { background: var(--surface); transform: translateY(-1px); }
+.action-btn:disabled { cursor: default; opacity: 0.5; }
+
+.action-btn.intent-warm:hover  { border-color: var(--warm); }
+.action-btn.intent-spicy:hover { border-color: var(--spicy); }
+.action-btn.intent-bold:hover  { border-color: var(--bold); }
+.action-btn.intent-mend:hover  { border-color: var(--mend); }
+.action-btn.intent-prom:hover  { border-color: #6a2890; }
+
+.action-top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.4rem; }
+.action-label { font-weight: 600; font-size: 0.92rem; }
+.action-score {
+  font-family: system-ui, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  min-width: 1.5rem;
+  text-align: center;
+}
+.action-btn.intent-warm  .action-score { color: var(--warm);  background: var(--warm-lt);  border-color: var(--warm); }
+.action-btn.intent-spicy .action-score { color: var(--spicy); background: var(--spicy-lt); border-color: var(--spicy); }
+.action-btn.intent-bold  .action-score { color: var(--bold);  background: var(--bold-lt);  border-color: var(--bold); }
+.action-btn.intent-mend  .action-score { color: var(--mend);  background: var(--mend-lt);  border-color: var(--mend); }
+.action-btn.intent-prom  .action-score { color: #6a2890;       background: #efe0f3;        border-color: #b87ad0; }
+
+.action-desc {
+  font-family: system-ui, sans-serif;
+  font-size: 0.76rem;
+  color: var(--muted);
 }
 
 .target-row {

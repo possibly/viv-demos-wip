@@ -1,25 +1,23 @@
 import { initializeVivRuntime, attemptAction, selectAction, EntityType } from "../../shared/viv-runtime.js";
-import { initGame, INTENTS, CHARACTER_DEFS, ITEM_DEFS, ACT1_TURNS, ACT2_TURNS } from "./sim.mjs";
+import { initGame, ACTION_CATALOG, CATEGORIES, CHARACTER_DEFS, ACT1_TURNS, ACT2_TURNS } from "./sim.mjs";
 
 const runtime = { initializeVivRuntime, attemptAction, selectAction, EntityType };
 let bundle = null;
 let game = null;
 let busy = false;
-let pendingTarget = null;
-let pendingIntent = null;
+let selectedTarget = null;
 let lastActSeen = 1;
 
-const statusEl     = document.getElementById("status");
-const logEl        = document.getElementById("log");
-const castGridEl   = document.getElementById("cast-grid");
-const targetRowEl  = document.getElementById("target-row");
-const intentRowEl  = document.getElementById("intent-row");
-const commitBtnEl  = document.getElementById("commit-btn");
-const turnCountEl  = document.getElementById("turn-count");
-const outcomeEl    = document.getElementById("outcome");
-const actLabelEl   = document.getElementById("act-label");
-const subtitleEl   = document.getElementById("subtitle");
-const actionHintEl = document.getElementById("action-hint");
+const statusEl       = document.getElementById("status");
+const logEl          = document.getElementById("log");
+const castGridEl     = document.getElementById("cast-grid");
+const actionPanelEl  = document.getElementById("action-panel");
+const actionListEl   = document.getElementById("action-list");
+const actionHintEl   = document.getElementById("action-hint");
+const turnCountEl    = document.getElementById("turn-count");
+const outcomeEl      = document.getElementById("outcome");
+const actLabelEl     = document.getElementById("act-label");
+const subtitleEl     = document.getElementById("subtitle");
 const alexStatusesEl = document.getElementById("alex-statuses");
 
 function setStatus(msg, isError = false) {
@@ -44,8 +42,9 @@ function renderCast(state) {
   castGridEl.innerHTML = "";
   for (const c of state.characters) {
     const snap = game.getSnapshot(c.id);
-    const card = document.createElement("div");
-    card.className = "cast-card" + (pendingTarget === c.id ? " selected" : "");
+    const card = document.createElement("button");
+    card.className = "cast-card" + (selectedTarget === c.id ? " selected" : "");
+    card.disabled = busy;
     card.innerHTML = `
       <div class="cast-row">
         <div class="cast-portrait">${c.portrait}</div>
@@ -60,6 +59,11 @@ function renderCast(state) {
         <span>cool ${snap.focusCool}</span><span>tension ${snap.focusTension}</span>
       </div>
     `;
+    card.addEventListener("click", () => {
+      selectedTarget = c.id;
+      renderCast(state);
+      renderActions();
+    });
     castGridEl.appendChild(card);
   }
 }
@@ -85,64 +89,54 @@ function renderAlexStatuses(state) {
   }
 }
 
-function renderTargets() {
-  targetRowEl.innerHTML = "";
-  const state = game.getState();
-  for (const c of state.characters) {
-    const snap = game.getSnapshot(c.id);
-    const btn = document.createElement("button");
-    btn.className = "target-btn" + (pendingTarget === c.id ? " selected" : "");
-    btn.innerHTML = `
-      <span class="t-portrait">${c.portrait}</span>
-      <span class="t-name">${c.name}</span>
-      <span class="t-vibe">b${snap.focusBuddy} r${snap.focusRomance}${snap.focusTension > 0 ? ` t${snap.focusTension}` : ""}</span>
-    `;
-    btn.disabled = busy;
-    btn.addEventListener("click", () => {
-      pendingTarget = c.id;
-      renderTargets();
-      renderCast(state);
-      updateHint();
-    });
-    targetRowEl.appendChild(btn);
+function renderActions() {
+  actionListEl.innerHTML = "";
+  if (!selectedTarget) {
+    actionHintEl.textContent = "Pick a target above";
+    actionListEl.innerHTML = `<div class="action-empty">Select someone from the cast to see what you can do.</div>`;
+    return;
+  }
+  const targetDef = CHARACTER_DEFS[selectedTarget];
+  const available = game.getAvailableActions(selectedTarget);
+  actionHintEl.textContent = `Toward ${targetDef.name} · ${available.length} option${available.length === 1 ? "" : "s"}`;
+
+  if (available.length === 0) {
+    actionListEl.innerHTML = `<div class="action-empty">Nothing comes to mind right now. Try a different target.</div>`;
+    return;
+  }
+
+  // Group by category, preserving the global volition-sort within each group.
+  const byCategory = {};
+  for (const a of available) (byCategory[a.category] ??= []).push(a);
+
+  for (const cat of CATEGORIES) {
+    const actions = byCategory[cat.key];
+    if (!actions || actions.length === 0) continue;
+    const group = document.createElement("div");
+    group.className = `action-group action-group-${cat.key}`;
+    group.innerHTML = `<div class="action-group-label">${cat.label}</div>`;
+    const grid = document.createElement("div");
+    grid.className = "action-grid";
+    for (const a of actions) {
+      const btn = document.createElement("button");
+      btn.className = `action-btn intent-${cat.key}`;
+      btn.disabled = busy;
+      btn.innerHTML = `
+        <div class="action-top">
+          <span class="action-label">${a.label}</span>
+          <span class="action-score">${a.volition}</span>
+        </div>
+        <div class="action-desc">${a.desc}</div>
+      `;
+      btn.addEventListener("click", () => handleAction(a.name));
+      grid.appendChild(btn);
+    }
+    group.appendChild(grid);
+    actionListEl.appendChild(group);
   }
 }
 
-function renderIntents() {
-  intentRowEl.innerHTML = "";
-  for (const [key, def] of Object.entries(INTENTS)) {
-    const btn = document.createElement("button");
-    btn.className = `intent-btn intent-${key}` + (pendingIntent === key ? " selected" : "");
-    btn.innerHTML = `
-      <span class="i-label">${def.label}</span>
-      <span class="i-desc">${def.desc}</span>
-    `;
-    btn.disabled = busy;
-    btn.addEventListener("click", () => {
-      pendingIntent = key;
-      renderIntents();
-      updateHint();
-    });
-    intentRowEl.appendChild(btn);
-  }
-}
-
-function updateHint() {
-  if (!pendingTarget && !pendingIntent) {
-    actionHintEl.textContent = "Pick a target, then an intent";
-  } else if (pendingTarget && !pendingIntent) {
-    const def = CHARACTER_DEFS[pendingTarget];
-    actionHintEl.textContent = `Toward ${def.name} — now pick an intent`;
-  } else if (!pendingTarget && pendingIntent) {
-    actionHintEl.textContent = `${INTENTS[pendingIntent].label} — pick a target`;
-  } else {
-    const def = CHARACTER_DEFS[pendingTarget];
-    actionHintEl.textContent = `${INTENTS[pendingIntent].label} toward ${def.name}`;
-  }
-  commitBtnEl.disabled = !pendingTarget || !pendingIntent || busy;
-}
-
-function appendLogEntry({ turn, intentKey, intentGloss, exchangeGloss, responseGloss, triggers, actNumber }) {
+function appendLogEntry({ turn, actionDef, exchangeGloss, responseGloss, triggers, actNumber }) {
   if (actNumber > lastActSeen) {
     const banner = document.createElement("div");
     banner.className = "log-act-banner";
@@ -152,21 +146,12 @@ function appendLogEntry({ turn, intentKey, intentGloss, exchangeGloss, responseG
   }
 
   const entry = document.createElement("div");
-  entry.className = "log-entry intent-" + intentKey;
+  entry.className = "log-entry intent-" + (actionDef.category ?? "warm");
 
-  let html = `
-    <div class="log-turn">Turn ${turn} · ${INTENTS[intentKey].label}</div>
-    <div class="log-player">${intentGloss}</div>
-  `;
-  if (exchangeGloss && exchangeGloss !== intentGloss) {
-    html += `<div class="log-exchange">${exchangeGloss}</div>`;
-  }
-  if (responseGloss) {
-    html += `<div class="log-response">${responseGloss}</div>`;
-  }
-  for (const t of triggers ?? []) {
-    html += `<div class="log-trigger">→ ${t.gloss}</div>`;
-  }
+  let html = `<div class="log-turn">Turn ${turn} · ${actionDef.label}</div>`;
+  if (exchangeGloss) html += `<div class="log-exchange">${exchangeGloss}</div>`;
+  if (responseGloss) html += `<div class="log-response">${responseGloss}</div>`;
+  for (const t of triggers ?? []) html += `<div class="log-trigger">→ ${t.gloss}</div>`;
   entry.innerHTML = html;
   logEl.appendChild(entry);
   logEl.scrollTop = logEl.scrollHeight;
@@ -202,28 +187,26 @@ function showOutcome(outcome) {
   document.getElementById("outcome-replay").addEventListener("click", () => startGame());
 }
 
-async function handleCommit() {
-  if (busy || !game || !pendingTarget || !pendingIntent) return;
+async function handleAction(actionName) {
+  if (busy || !game || !selectedTarget) return;
   busy = true;
-  commitBtnEl.disabled = true;
   setStatus("Thinking…");
+  renderActions();
 
   try {
+    const actionDef = ACTION_CATALOG.find(a => a.name === actionName);
     const beforeState = game.getState();
-    const result = await game.takeTurn(pendingTarget, pendingIntent);
+    const result = await game.takeTurn(actionName, selectedTarget);
 
     appendLogEntry({
       turn:          beforeState.turn + 1,
-      intentKey:     pendingIntent,
-      intentGloss:   result.intent?.gloss   ?? "(no gloss)",
+      actionDef,
       exchangeGloss: result.exchange?.gloss ?? null,
       responseGloss: result.response?.gloss ?? null,
       triggers:      result.triggers ?? [],
       actNumber:     result.actNumber,
     });
 
-    pendingTarget = null;
-    pendingIntent = null;
     busy = false;
     setStatus("");
 
@@ -231,26 +214,21 @@ async function handleCommit() {
     renderActHeader(state.actNumber, state.turn);
     renderCast(state);
     renderAlexStatuses(state);
-    renderTargets();
-    renderIntents();
-    updateHint();
+    renderActions();
 
-    if (result.outcome) {
-      showOutcome(result.outcome);
-    }
+    if (result.outcome) showOutcome(result.outcome);
   } catch (err) {
     busy = false;
     setStatus(`Error: ${err.message}`, true);
     console.error(err);
-    updateHint();
+    renderActions();
   }
 }
 
 async function startGame() {
   outcomeEl.hidden = true;
   logEl.innerHTML = "";
-  pendingTarget = null;
-  pendingIntent = null;
+  selectedTarget = null;
   lastActSeen = 1;
   setStatus("Loading…");
 
@@ -261,16 +239,13 @@ async function startGame() {
     renderActHeader(state.actNumber, state.turn);
     renderCast(state);
     renderAlexStatuses(state);
-    renderTargets();
-    renderIntents();
-    updateHint();
+    renderActions();
 
     logEl.innerHTML = `<div class="log-intro">
       <strong>${startInfo.opening?.gloss ?? "The week before prom."}</strong>
       <br><br>
-      Goal: end prom night with someone — date, friend, anyone. Pick a target, pick an intent (warm, romantic, bold, mend), and Viv will pick the exchange that fits your social state. ${ACT1_TURNS} turns at school, then ${ACT2_TURNS} at the prom.
+      Pick someone, then pick a move. Only moves you're actually inclined to try right now will appear — the number on each button is how much you want it (utility score from the social state). Build friendships and romance over ${ACT1_TURNS} school turns, then ${ACT2_TURNS} more at the prom.
     </div>`;
-
     setStatus("");
   } catch (err) {
     setStatus(`Failed to load: ${err.message}`, true);
@@ -282,7 +257,6 @@ async function init() {
   setStatus("Loading…");
   try {
     bundle = await fetch("./bundle.json").then(r => r.json());
-    commitBtnEl.addEventListener("click", handleCommit);
     await startGame();
   } catch (err) {
     setStatus(`Failed to load: ${err.message}`, true);
