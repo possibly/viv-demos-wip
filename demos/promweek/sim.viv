@@ -1,279 +1,254 @@
-// Promweek — two-act high school social physics.
+// Promweek — two-act high school social physics, with utility-scored action menus.
 //
-// The player guides Alex through the week before prom (Act 1, at school) and
-// through prom night itself (Act 2, at the prom). Each turn, the player picks
-// a target and a high-level intent (#WARM, #SPICY, #BOLD, #MEND). Viv then
-// selects the specific social exchange that fires, based on:
+// Each concrete action is a reserved action gated by a single condition:
+//   ~volition(@alex, @target, "<action-name>") > 0
 //
-//   * Relationships — binary, reciprocal, public  ("friends" | "dating" | "enemies")
-//   * Social networks — scalar, non-reciprocal, private  (buddy, romance, cool, tension)
-//   * Statuses — temporary feelings & social standing  (popular, has-crush[X])
-//   * Traits — permanent personality attributes  (intellectual, vain, loyal, ...)
-//   * Social fact database — the chronicle of past actions
-//   * Cultural knowledge base — items with zeitgeist coolness + per-character likes/dislikes
+// The volition function lives in the host adapter (sim.mjs) and sums rule
+// weights based on traits, relationships, networks, statuses, and act. The
+// same function feeds the player's action menu: only actions with positive
+// volition are shown for the selected target, ordered by score. The player
+// picks a specific Viv action; Viv fires it; effects and reactions run.
 //
-// All action selection happens in Viv via the `select-exchange` selector chain.
-// The host only sets `@alex.intent` from the player's UI and renders the rest.
+// State model mirrors Prom Week:
+//   * relationships — binary, reciprocal, public  ("friends" | "dating" | "enemies")
+//   * social networks — scalar, non-reciprocal, private  (buddy, romance, cool, tension)
+//   * statuses — temporary feelings & social standing  (popular, embarrassed, crush[X])
+//   * traits — permanent personality attributes
+//   * social fact database — Viv's action chronicle
+//   * cultural knowledge base — items with zeitgeist coolness + per-character likes
 
 
-// ── Player turn entry point ─────────────────────────────────────────────────
+// ── Act 1 exchanges (at school) ─────────────────────────────────────────────
 
-reserved action player-turn:
-    gloss: "@alex makes a move toward @target"
+reserved action small-talk:
+    gloss: "@alex makes small talk with @target"
     roles:
         @alex:
             as: initiator
         @target:
             as: recipient, precast
-    reactions:
-        queue action-selector select-exchange:
-            with:
-                @alex: @alex
-                @target: @target
-            urgent: true
-
-
-// ── Master exchange selector ────────────────────────────────────────────────
-//
-// Tries sub-selectors in order. Each sub-selector has a `conditions` block
-// gating it on @alex.intent and @alex.act, plus its own ordered candidate list.
-// First selector whose conditions pass AND that successfully targets a
-// candidate is the one that fires. Falls back to awkward-pause.
-
-reserved action-selector select-exchange:
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
-    target in order:
-        selector act2-exchanges:
-            with:
-                @alex: @alex
-                @target: @target
-        selector spicy-exchanges:
-            with:
-                @alex: @alex
-                @target: @target
-        selector bold-exchanges:
-            with:
-                @alex: @alex
-                @target: @target
-        selector mend-exchanges:
-            with:
-                @alex: @alex
-                @target: @target
-        selector warm-exchanges:
-            with:
-                @alex: @alex
-                @target: @target
-        awkward-pause:
-            with:
-                @alex: @alex
-                @target: @target
-
-
-// ── ACT 2 exchanges (at the prom) ───────────────────────────────────────────
-
-reserved action-selector act2-exchanges:
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
     conditions:
-        @alex.act == #ACT_TWO
-    target in order:
-        public-declaration:
-            with:
-                @alex: @alex
-                @target: @target
-        slow-dance:
-            with:
-                @alex: @alex
-                @target: @target
-        prom-confess:
-            with:
-                @alex: @alex
-                @target: @target
-        ask-to-dance:
-            with:
-                @alex: @alex
-                @target: @target
-        chat-prom:
-            with:
-                @alex: @alex
-                @target: @target
-
-reserved action public-declaration:
-    gloss: "@alex steps onto the dance floor and announces, loud enough for everyone, that @target is the reason they came tonight"
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
-    conditions:
-        @alex.intent == #SPICY
-        @alex.romance[@target.id]? >= 55
-    effects:
-        if @target.romance[@alex.id]? >= 50:
-            @alex.romance[@target.id] += 12
-            @target.romance[@alex.id] += 18
-            @alex.buddy[@target.id] += 6
-            @target.buddy[@alex.id] += 6
-        else:
-            @target.tension[@alex.id] += 25
-            @alex.tension[@target.id] += 15
-            @target.cool[@alex.id] -= 8
-        end
-    reactions:
-        queue action-selector target-response:
-            with:
-                @target: @target
-                @alex: @alex
-            urgent: true
-        queue action run-triggers:
-            with:
-                @alex: @alex
-                @target: @target
-            urgent: true
-
-reserved action slow-dance:
-    gloss: "@alex pulls @target close as the slow song starts. Nobody else exists for a minute."
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
-    conditions:
-        @alex.relationships[@target.id]? == "dating"
-        || (@alex.romance[@target.id]? >= 35 && @target.romance[@alex.id]? >= 25)
-    effects:
-        @alex.romance[@target.id] += 10
-        @target.romance[@alex.id] += 10
-        @alex.buddy[@target.id] += 4
-        @target.buddy[@alex.id] += 4
-    reactions:
-        queue action-selector target-response:
-            with:
-                @target: @target
-                @alex: @alex
-            urgent: true
-        queue action run-triggers:
-            with:
-                @alex: @alex
-                @target: @target
-            urgent: true
-
-reserved action prom-confess:
-    gloss: '@alex finds a quiet corner with @target. "I should have said this sooner."'
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
-    conditions:
-        @alex.intent == #SPICY
-        @alex.romance[@target.id]? >= 30
-    effects:
-        if @target.romance[@alex.id]? >= 20:
-            @alex.romance[@target.id] += 9
-            @target.romance[@alex.id] += 9
-            @alex.buddy[@target.id] += 3
-        else:
-            @target.tension[@alex.id] += 10
-            @target.buddy[@alex.id] -= 2
-        end
-    reactions:
-        queue action-selector target-response:
-            with:
-                @target: @target
-                @alex: @alex
-            urgent: true
-        queue action run-triggers:
-            with:
-                @alex: @alex
-                @target: @target
-            urgent: true
-
-reserved action ask-to-dance:
-    gloss: "@alex offers @target a hand on the dance floor"
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
-    conditions:
-        @alex.buddy[@target.id]? >= 25
-        || @alex.relationships[@target.id]? == "friends"
-        || @alex.relationships[@target.id]? == "dating"
-    effects:
-        if @target.buddy[@alex.id]? >= 20 || @target.romance[@alex.id]? >= 15:
-            @alex.buddy[@target.id] += 5
-            @target.buddy[@alex.id] += 5
-            @alex.romance[@target.id] += 3
-            @target.romance[@alex.id] += 2
-        else:
-            @alex.tension[@target.id] += 5
-            @target.tension[@alex.id] += 3
-        end
-    reactions:
-        queue action-selector target-response:
-            with:
-                @target: @target
-                @alex: @alex
-            urgent: true
-        queue action run-triggers:
-            with:
-                @alex: @alex
-                @target: @target
-            urgent: true
-
-reserved action chat-prom:
-    gloss: "@alex catches @target near the punch table for some easy conversation"
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
+        ~volition(@alex, @target, "small-talk") > 0
     effects:
         @alex.buddy[@target.id] += 2
         @target.buddy[@alex.id] += 2
+        if @target.tension[@alex.id]? > 0:
+            @target.tension[@alex.id] -= 1
+        end
     reactions:
         queue action-selector target-response:
             with:
                 @target: @target
                 @alex: @alex
             urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
 
-
-// ── SPICY exchanges (Act 1) ─────────────────────────────────────────────────
-
-reserved action-selector spicy-exchanges:
+reserved action compliment:
+    gloss: "@alex compliments @target"
     roles:
         @alex:
             as: initiator
         @target:
-            as: recipient
+            as: recipient, precast
     conditions:
-        @alex.intent == #SPICY
-    target in order:
-        ask-out:
+        ~volition(@alex, @target, "compliment") > 0
+    effects:
+        @alex.buddy[@target.id] += 3
+        @target.buddy[@alex.id] += 4
+        @target.cool[@alex.id] += 1
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
             with:
                 @alex: @alex
                 @target: @target
-        flirt-bold:
+            urgent: true
+
+reserved action share-interest:
+    gloss: "@alex talks @target's ear off about @item"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient, precast
+        @item:
+            as: item, anywhere
+            from: @alex.likes
+    conditions:
+        @item in @target.likes
+        @item.coolness >= 0
+        ~volition(@alex, @target, "share-interest") > 0
+    effects:
+        @alex.buddy[@target.id] += 5
+        @target.buddy[@alex.id] += 5
+        @alex.cool[@target.id] += 2
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
             with:
                 @alex: @alex
                 @target: @target
-        confide-secret:
+            urgent: true
+
+reserved action bond-over-lame:
+    gloss: "@alex and @target bond over how much they both love @item, which everyone else thinks is lame"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient, precast
+        @item:
+            as: item, anywhere
+            from: @alex.likes
+    conditions:
+        @item in @target.likes
+        @item.coolness < 0
+        ~volition(@alex, @target, "bond-over-lame") > 0
+    effects:
+        @alex.buddy[@target.id] += 9
+        @target.buddy[@alex.id] += 9
+        @alex.romance[@target.id] += 2
+        @target.romance[@alex.id] += 2
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
             with:
                 @alex: @alex
                 @target: @target
-        flirt-soft:
+            urgent: true
+
+reserved action sincere-compliment:
+    gloss: "@alex says something specific and true about @target"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient, precast
+    conditions:
+        ~volition(@alex, @target, "sincere-compliment") > 0
+    effects:
+        @alex.buddy[@target.id] += 4
+        @target.buddy[@alex.id] += 6
+        @target.cool[@alex.id] += 3
+        if @target.tension[@alex.id]? > 0:
+            @target.tension[@alex.id] -= 3
+        end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
             with:
                 @alex: @alex
                 @target: @target
+            urgent: true
+
+reserved action flirt-soft:
+    gloss: "@alex tries a half-smile and a knowing look with @target"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient, precast
+    conditions:
+        ~volition(@alex, @target, "flirt-soft") > 0
+    effects:
+        if @target.buddy[@alex.id]? >= 25:
+            @alex.romance[@target.id] += 4
+            @target.romance[@alex.id] += 3
+        else:
+            @target.tension[@alex.id] += 4
+        end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action flirt-bold:
+    gloss: "@alex leans in close and flirts shamelessly with @target"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient, precast
+    conditions:
+        ~volition(@alex, @target, "flirt-bold") > 0
+    effects:
+        if @target.romance[@alex.id]? >= 20 || @target.buddy[@alex.id]? >= 35:
+            @alex.romance[@target.id] += 7
+            @target.romance[@alex.id] += 9
+        else:
+            @target.tension[@alex.id] += 11
+            @target.cool[@alex.id] -= 4
+            @alex.romance[@target.id] -= 2
+        end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action confide-secret:
+    gloss: "@alex tells @target something they haven't told anyone else"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient, precast
+    conditions:
+        ~volition(@alex, @target, "confide-secret") > 0
+    effects:
+        if @target.buddy[@alex.id]? >= 25:
+            @alex.buddy[@target.id] += 8
+            @target.buddy[@alex.id] += 10
+            @alex.romance[@target.id] += 4
+            @target.romance[@alex.id] += 3
+        else:
+            @target.tension[@alex.id] += 5
+            @alex.tension[@target.id] += 4
+        end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
 
 reserved action ask-out:
     gloss: "@alex asks @target out — proper, eye contact, the whole thing"
@@ -281,10 +256,9 @@ reserved action ask-out:
         @alex:
             as: initiator
         @target:
-            as: recipient
+            as: recipient, precast
     conditions:
-        @alex.romance[@target.id]? >= 30
-        @alex.buddy[@target.id]? >= 35
+        ~volition(@alex, @target, "ask-out") > 0
     effects:
         if @target.romance[@alex.id]? >= 30 && @target.buddy[@alex.id]? >= 25:
             @alex.romance[@target.id] += 10
@@ -308,49 +282,23 @@ reserved action ask-out:
                 @target: @target
             urgent: true
 
-reserved action flirt-bold:
-    gloss: "@alex leans in close and flirts shamelessly with @target"
+reserved action debate-target:
+    gloss: "@alex pushes back hard on @target's take. Sparks fly — the productive kind."
     roles:
         @alex:
             as: initiator
         @target:
-            as: recipient
+            as: recipient, precast
     conditions:
-        @alex.romance[@target.id]? >= 15
+        ~volition(@alex, @target, "debate-target") > 0
     effects:
-        if @target.romance[@alex.id]? >= 20 || @target.buddy[@alex.id]? >= 35:
-            @alex.romance[@target.id] += 7
-            @target.romance[@alex.id] += 9
-        else:
-            @target.tension[@alex.id] += 11
-            @target.cool[@alex.id] -= 4
-            @alex.romance[@target.id] -= 2
-        end
-    reactions:
-        queue action-selector target-response:
-            with:
-                @target: @target
-                @alex: @alex
-            urgent: true
-        queue action run-triggers:
-            with:
-                @alex: @alex
-                @target: @target
-            urgent: true
-
-reserved action flirt-soft:
-    gloss: "@alex tries a half-smile and a knowing look — testing the water with @target"
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
-    effects:
+        @alex.cool[@target.id] += 6
+        @target.cool[@alex.id] += 6
         if @target.buddy[@alex.id]? >= 25:
-            @alex.romance[@target.id] += 4
-            @target.romance[@alex.id] += 3
+            @alex.buddy[@target.id] += 3
+            @target.buddy[@alex.id] += 3
         else:
-            @target.tension[@alex.id] += 4
+            @target.tension[@alex.id] += 3
         end
     reactions:
         queue action-selector target-response:
@@ -363,62 +311,6 @@ reserved action flirt-soft:
                 @alex: @alex
                 @target: @target
             urgent: true
-
-reserved action confide-secret:
-    gloss: "@alex tells @target something they haven't told anyone else"
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
-    conditions:
-        @alex.buddy[@target.id]? >= 20
-    effects:
-        if @target.buddy[@alex.id]? >= 25:
-            @alex.buddy[@target.id] += 8
-            @target.buddy[@alex.id] += 10
-            @alex.romance[@target.id] += 4
-            @target.romance[@alex.id] += 3
-        else:
-            @target.tension[@alex.id] += 5
-            @alex.tension[@target.id] += 4
-        end
-    reactions:
-        queue action-selector target-response:
-            with:
-                @target: @target
-                @alex: @alex
-            urgent: true
-        queue action run-triggers:
-            with:
-                @alex: @alex
-                @target: @target
-            urgent: true
-
-
-// ── BOLD exchanges (Act 1) ──────────────────────────────────────────────────
-
-reserved action-selector bold-exchanges:
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
-    conditions:
-        @alex.intent == #BOLD
-    target in order:
-        confront:
-            with:
-                @alex: @alex
-                @target: @target
-        spread-rumor:
-            with:
-                @alex: @alex
-                @target: @target
-        debate-target:
-            with:
-                @alex: @alex
-                @target: @target
 
 reserved action confront:
     gloss: "@alex confronts @target directly, calling out the elephant in the room"
@@ -426,9 +318,9 @@ reserved action confront:
         @alex:
             as: initiator
         @target:
-            as: recipient
+            as: recipient, precast
     conditions:
-        @alex.tension[@target.id]? >= 15
+        ~volition(@alex, @target, "confront") > 0
     effects:
         @target.tension[@alex.id] += 8
         @alex.cool[@target.id] += 5
@@ -454,7 +346,9 @@ reserved action spread-rumor:
         @alex:
             as: initiator
         @target:
-            as: recipient
+            as: recipient, precast
+    conditions:
+        ~volition(@alex, @target, "spread-rumor") > 0
     effects:
         @target.tension[@alex.id] += 14
         @target.buddy[@alex.id] -= 6
@@ -472,64 +366,15 @@ reserved action spread-rumor:
                 @target: @target
             urgent: true
 
-reserved action debate-target:
-    gloss: "@alex pushes back hard on @target's take. Sparks fly — the productive kind."
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
-    effects:
-        @alex.cool[@target.id] += 6
-        @target.cool[@alex.id] += 6
-        if @target.buddy[@alex.id]? >= 25:
-            @alex.buddy[@target.id] += 3
-            @target.buddy[@alex.id] += 3
-        else:
-            @target.tension[@alex.id] += 3
-        end
-    reactions:
-        queue action-selector target-response:
-            with:
-                @target: @target
-                @alex: @alex
-            urgent: true
-        queue action run-triggers:
-            with:
-                @alex: @alex
-                @target: @target
-            urgent: true
-
-
-// ── MEND exchanges (Act 1) ──────────────────────────────────────────────────
-
-reserved action-selector mend-exchanges:
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
-    conditions:
-        @alex.intent == #MEND
-    target in order:
-        apologize-deep:
-            with:
-                @alex: @alex
-                @target: @target
-        sincere-compliment:
-            with:
-                @alex: @alex
-                @target: @target
-
 reserved action apologize-deep:
     gloss: "@alex apologizes to @target — not the perfunctory kind"
     roles:
         @alex:
             as: initiator
         @target:
-            as: recipient
+            as: recipient, precast
     conditions:
-        @target.tension[@alex.id]? >= 20
+        ~volition(@alex, @target, "apologize-deep") > 0
     effects:
         @target.tension[@alex.id] -= 18
         @target.buddy[@alex.id] += 6
@@ -547,155 +392,21 @@ reserved action apologize-deep:
                 @target: @target
             urgent: true
 
-reserved action sincere-compliment:
-    gloss: "@alex says something specific and true about @target"
+
+// ── Act 2 exchanges (at the prom) ───────────────────────────────────────────
+
+reserved action chat-prom:
+    gloss: "@alex catches @target near the punch table for some easy conversation"
     roles:
         @alex:
             as: initiator
         @target:
-            as: recipient
-    effects:
-        @alex.buddy[@target.id] += 4
-        @target.buddy[@alex.id] += 6
-        @target.cool[@alex.id] += 3
-        if @target.tension[@alex.id]? > 0:
-            @target.tension[@alex.id] -= 3
-        end
-    reactions:
-        queue action-selector target-response:
-            with:
-                @target: @target
-                @alex: @alex
-            urgent: true
-        queue action run-triggers:
-            with:
-                @alex: @alex
-                @target: @target
-            urgent: true
-
-
-// ── WARM exchanges (Act 1, also serves as fallback in Act 2 if act2 selector
-//    doesn't match) ──────────────────────────────────────────────────────────
-
-reserved action-selector warm-exchanges:
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
-    target in order:
-        share-interest:
-            with partial:
-                @alex: @alex
-                @target: @target
-        bond-over-lame:
-            with partial:
-                @alex: @alex
-                @target: @target
-        compliment:
-            with:
-                @alex: @alex
-                @target: @target
-        small-talk:
-            with:
-                @alex: @alex
-                @target: @target
-
-reserved action share-interest:
-    gloss: "@alex talks @target's ear off about @item"
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
-        @item:
-            as: item, anywhere
-            from: @alex.likes
+            as: recipient, precast
     conditions:
-        @item in @target.likes
-        @item.coolness >= 0
-    effects:
-        @alex.buddy[@target.id] += 5
-        @target.buddy[@alex.id] += 5
-        @alex.cool[@target.id] += 2
-    reactions:
-        queue action-selector target-response:
-            with:
-                @target: @target
-                @alex: @alex
-            urgent: true
-        queue action run-triggers:
-            with:
-                @alex: @alex
-                @target: @target
-            urgent: true
-
-reserved action bond-over-lame:
-    gloss: "@alex and @target bond over how much they both love @item, which everyone else considers lame"
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
-        @item:
-            as: item, anywhere
-            from: @alex.likes
-    conditions:
-        @item in @target.likes
-        @item.coolness < 0
-    effects:
-        @alex.buddy[@target.id] += 9
-        @target.buddy[@alex.id] += 9
-        @alex.romance[@target.id] += 2
-        @target.romance[@alex.id] += 2
-    reactions:
-        queue action-selector target-response:
-            with:
-                @target: @target
-                @alex: @alex
-            urgent: true
-        queue action run-triggers:
-            with:
-                @alex: @alex
-                @target: @target
-            urgent: true
-
-reserved action compliment:
-    gloss: "@alex compliments @target"
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
-    effects:
-        @alex.buddy[@target.id] += 3
-        @target.buddy[@alex.id] += 4
-        @target.cool[@alex.id] += 1
-    reactions:
-        queue action-selector target-response:
-            with:
-                @target: @target
-                @alex: @alex
-            urgent: true
-        queue action run-triggers:
-            with:
-                @alex: @alex
-                @target: @target
-            urgent: true
-
-reserved action small-talk:
-    gloss: "@alex makes small talk with @target"
-    roles:
-        @alex:
-            as: initiator
-        @target:
-            as: recipient
+        ~volition(@alex, @target, "chat-prom") > 0
     effects:
         @alex.buddy[@target.id] += 2
         @target.buddy[@alex.id] += 2
-        if @target.tension[@alex.id]? > 0:
-            @target.tension[@alex.id] -= 1
-        end
     reactions:
         queue action-selector target-response:
             with:
@@ -703,24 +414,129 @@ reserved action small-talk:
                 @alex: @alex
             urgent: true
 
-
-// ── Absolute fallback ───────────────────────────────────────────────────────
-
-reserved action awkward-pause:
-    gloss: "@alex hesitates. The moment passes. @target gives a polite half-smile."
+reserved action ask-to-dance:
+    gloss: "@alex offers @target a hand on the dance floor"
     roles:
         @alex:
             as: initiator
         @target:
-            as: recipient
+            as: recipient, precast
+    conditions:
+        ~volition(@alex, @target, "ask-to-dance") > 0
     effects:
-        @alex.tension[@target.id] += 2
+        if @target.buddy[@alex.id]? >= 20 || @target.romance[@alex.id]? >= 15:
+            @alex.buddy[@target.id] += 5
+            @target.buddy[@alex.id] += 5
+            @alex.romance[@target.id] += 3
+            @target.romance[@alex.id] += 2
+        else:
+            @alex.tension[@target.id] += 5
+            @target.tension[@alex.id] += 3
+        end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action slow-dance:
+    gloss: "@alex pulls @target close as the slow song starts. Nobody else exists for a minute."
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient, precast
+    conditions:
+        ~volition(@alex, @target, "slow-dance") > 0
+    effects:
+        @alex.romance[@target.id] += 10
+        @target.romance[@alex.id] += 10
+        @alex.buddy[@target.id] += 4
+        @target.buddy[@alex.id] += 4
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action prom-confess:
+    gloss: '@alex finds a quiet corner with @target. "I should have said this sooner."'
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient, precast
+    conditions:
+        ~volition(@alex, @target, "prom-confess") > 0
+    effects:
+        if @target.romance[@alex.id]? >= 20:
+            @alex.romance[@target.id] += 9
+            @target.romance[@alex.id] += 9
+            @alex.buddy[@target.id] += 3
+        else:
+            @target.tension[@alex.id] += 10
+            @target.buddy[@alex.id] -= 2
+        end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
+
+reserved action public-declaration:
+    gloss: "@alex steps onto the dance floor and announces, loud enough for everyone, that @target is the reason they came tonight"
+    roles:
+        @alex:
+            as: initiator
+        @target:
+            as: recipient, precast
+    conditions:
+        ~volition(@alex, @target, "public-declaration") > 0
+    effects:
+        if @target.romance[@alex.id]? >= 50:
+            @alex.romance[@target.id] += 12
+            @target.romance[@alex.id] += 18
+            @alex.buddy[@target.id] += 6
+            @target.buddy[@alex.id] += 6
+        else:
+            @target.tension[@alex.id] += 25
+            @alex.tension[@target.id] += 15
+            @target.cool[@alex.id] -= 8
+        end
+    reactions:
+        queue action-selector target-response:
+            with:
+                @target: @target
+                @alex: @alex
+            urgent: true
+        queue action run-triggers:
+            with:
+                @alex: @alex
+                @target: @target
+            urgent: true
 
 
-// ── Target response action-selector ─────────────────────────────────────────
+// ── Target response selector ────────────────────────────────────────────────
 //
-// After every exchange, the target's reaction is selected. Picks in order:
-// fuming → thrilled → icy → warm → cool (neutral fallback).
+// Picks the target's reaction based on their current feelings toward Alex.
 
 reserved action-selector target-response:
     roles:
@@ -817,9 +633,8 @@ reserved action react-cool:
 
 // ── Trigger rules ───────────────────────────────────────────────────────────
 //
-// `run-triggers` queues every trigger-rule action as an urgent reaction. Each
-// trigger has its own conditions. The drain loop picks off any that fire.
-// Mirrors Prom Week's notion of "trigger rules" running after every exchange.
+// Queued as urgent reactions after each exchange. Each trigger has its own
+// conditions; those that match fire.
 
 reserved action run-triggers:
     gloss: "(triggers)"
@@ -915,7 +730,7 @@ reserved action set-has-crush:
         @alex.statuses.crush[@target.id] = true
 
 
-// ── Scene-opening actions (called by host on act start) ─────────────────────
+// ── Scene-opening actions ───────────────────────────────────────────────────
 
 reserved action act1-opens:
     gloss: "Northside High, the cafeteria. Six lunch periods until prom."

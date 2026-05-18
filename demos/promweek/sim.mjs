@@ -1,19 +1,16 @@
-// Promweek — two-act high school social physics.
+// Promweek — two-act high school social physics with utility-scored action menus.
 //
-// All social logic — conditions, effects, exchange selection, target reactions,
-// and trigger rules — lives in sim.viv. The host here is intentionally thin:
+// All social effects, reactions, and trigger rules live in sim.viv. Each
+// concrete action is gated by a single condition: `~volition(...) > 0`.
+// The volition function (defined below) sums rule weights based on the
+// current social state — traits, networks, statuses, relationships, act —
+// and returns a score (or null when the action can't apply at all).
 //
-//   * builds the storyworld (5 characters, 6 CKB items, initial network values)
-//   * provides the Viv adapter (read/write entity state, enums, etc.)
-//   * drives one turn at a time:
-//       - host writes alex.intent to the player's chosen intent
-//       - host fires `player-turn` with @alex + @target precast
-//       - host drains urgent reactions (exchange selector → reaction → triggers)
-//   * computes derived UI labels (relationship vibes, prom outcome)
-//
-// Act transition: after a fixed number of Act 1 turns, the host fires
-// `act2-opens` to switch the storyworld into Act 2. Different Viv conditions
-// then gate which exchanges fire.
+// The same function feeds the player's menu: for the selected target, the
+// host enumerates every concrete action, computes its volition, and shows
+// the ones with score > 0, sorted by score. The player picks a specific
+// Viv action; Viv evaluates the condition, fires the action, applies
+// effects, and queues the target's response plus the trigger rules.
 
 function mulberry32(seed) {
   return () => {
@@ -53,8 +50,6 @@ const setIn = (obj, path, value) => {
 export const ACT1_TURNS = 6;
 export const ACT2_TURNS = 4;
 
-// Cultural Knowledge Base: items have a zeitgeist `coolness` score. Each
-// character has personal `likes` / `dislikes` / `wants` referencing item IDs.
 export const ITEM_DEFS = {
   "scientific-calculator": { name: "scientific calculator", coolness: -30 },
   "poetry-book":           { name: "poetry book",           coolness: -10 },
@@ -107,38 +102,31 @@ export const CHARACTER_DEFS = {
   },
 };
 
-// Initial pairwise networks. Mirrors Prom Week's social networks: scalar,
-// non-reciprocal, private feelings. 0–100 each.
 const INITIAL_NETWORKS = {
-  // Alex's view of others
   alex: {
     jordan: { buddy: 18, romance: 5,  cool: 25, tension: 5  },
     riley:  { buddy: 15, romance: 10, cool: 40, tension: 0  },
     sam:    { buddy: 55, romance: 0,  cool: 30, tension: 0  },
     casey:  { buddy: 22, romance: 3,  cool: 28, tension: 0  },
   },
-  // Jordan's view
   jordan: {
     alex:   { buddy: 15, romance: 0,  cool: 22, tension: 8  },
     riley:  { buddy: 5,  romance: 0,  cool: 15, tension: 18 },
     sam:    { buddy: 20, romance: 0,  cool: 22, tension: 0  },
     casey:  { buddy: 40, romance: 2,  cool: 35, tension: 0  },
   },
-  // Riley's view
   riley: {
     alex:   { buddy: 18, romance: 8,  cool: 35, tension: 0  },
     jordan: { buddy: 5,  romance: 0,  cool: 8,  tension: 20 },
     sam:    { buddy: 15, romance: 0,  cool: 18, tension: 5  },
     casey:  { buddy: 8,  romance: 0,  cool: 12, tension: 6  },
   },
-  // Sam's view
   sam: {
     alex:   { buddy: 60, romance: 0,  cool: 35, tension: 0  },
     jordan: { buddy: 25, romance: 0,  cool: 28, tension: 0  },
     riley:  { buddy: 10, romance: 0,  cool: 20, tension: 8  },
     casey:  { buddy: 30, romance: 0,  cool: 32, tension: 0  },
   },
-  // Casey's view
   casey: {
     alex:   { buddy: 22, romance: 0,  cool: 26, tension: 0  },
     jordan: { buddy: 38, romance: 2,  cool: 35, tension: 0  },
@@ -147,21 +135,256 @@ const INITIAL_NETWORKS = {
   },
 };
 
-// Initial public relationships. Symmetric: friends/dating/enemies are
-// reciprocal in Prom Week's design.
 const INITIAL_RELATIONSHIPS = {
   alex:   { sam:    "friends" },
   sam:    { alex:   "friends" },
 };
 
-// ── Player intent + action catalogue ────────────────────────────────────────
+// ── Action catalogue (single source of truth for the player menu) ──────────
+//
+// Each entry: name (matches Viv action), label, blurb, category (for UI
+// grouping/coloring), act (which act it's available in).
 
-export const INTENTS = {
-  WARM:  { key: "WARM",  label: "Warm",     desc: "Be friendly. Small talk, compliments, share an interest.",       color: "warm"  },
-  SPICY: { key: "SPICY", label: "Romantic", desc: "Test the romantic water. Flirt, confide, ask out.",              color: "spicy" },
-  BOLD:  { key: "BOLD",  label: "Bold",     desc: "Push. Debate, confront, spread a rumor.",                        color: "bold"  },
-  MEND:  { key: "MEND",  label: "Mend",     desc: "Repair things. Apologize sincerely, compliment from the heart.", color: "mend"  },
+export const ACTION_CATALOG = [
+  // ── Act 1 ──
+  { name: "small-talk",         label: "Make small talk",      desc: "Low-stakes chitchat. Always safe.",                   category: "warm",  act: 1 },
+  { name: "compliment",         label: "Compliment them",      desc: "A light kindness.",                                   category: "warm",  act: 1 },
+  { name: "share-interest",     label: "Share an interest",    desc: "Talk about something you both like (cool).",          category: "warm",  act: 1 },
+  { name: "bond-over-lame",     label: "Bond over a lame thing", desc: "Geek out together over something everyone hates.",  category: "warm",  act: 1 },
+  { name: "sincere-compliment", label: "Compliment, sincerely",desc: "Something specific and true.",                        category: "mend",  act: 1 },
+  { name: "flirt-soft",         label: "Flirt softly",         desc: "Test the water with a knowing look.",                 category: "spicy", act: 1 },
+  { name: "flirt-bold",         label: "Flirt boldly",         desc: "Lean in. No subtlety.",                               category: "spicy", act: 1 },
+  { name: "confide-secret",     label: "Confide something",    desc: "Trust them with something personal.",                 category: "spicy", act: 1 },
+  { name: "ask-out",            label: "Ask them out",         desc: "Make it a real ask.",                                 category: "spicy", act: 1 },
+  { name: "debate-target",      label: "Push back on them",    desc: "Challenge their take. Productively.",                 category: "bold",  act: 1 },
+  { name: "confront",           label: "Confront them",        desc: "Call out the elephant in the room.",                  category: "bold",  act: 1 },
+  { name: "spread-rumor",       label: "Spread a rumor",       desc: "Tell anyone who'll listen.",                          category: "bold",  act: 1 },
+  { name: "apologize-deep",     label: "Apologize",            desc: "A real apology. Needs something to apologize for.",   category: "mend",  act: 1 },
+  // ── Act 2 ──
+  { name: "chat-prom",          label: "Catch up at the punch table", desc: "Easy prom conversation.",                      category: "prom",  act: 2 },
+  { name: "ask-to-dance",       label: "Ask to dance",         desc: "Offer your hand.",                                    category: "prom",  act: 2 },
+  { name: "slow-dance",         label: "Slow dance",           desc: "Pull them close. Nobody else exists for a minute.",   category: "prom",  act: 2 },
+  { name: "prom-confess",       label: "Confess in a corner",  desc: '"I should have said this sooner."',                   category: "prom",  act: 2 },
+  { name: "public-declaration", label: "Public declaration",   desc: "Announce it. Loud. To everyone.",                     category: "prom",  act: 2 },
+];
+
+export const CATEGORIES = [
+  { key: "warm",  label: "Warm"     },
+  { key: "spicy", label: "Romantic" },
+  { key: "bold",  label: "Bold"     },
+  { key: "mend",  label: "Mend"     },
+  { key: "prom",  label: "Prom"     },
+];
+
+// ── Volition rules ─────────────────────────────────────────────────────────
+//
+// One function per action. Returns a numeric score, or null if the action
+// can't apply at all (wrong act, missing CKB item, hard prereq unmet).
+//
+// Scores typically run 0–25. Baselines 3–6, modifiers ±2–15. The action
+// is visible to the player and runnable in Viv iff volition > 0. So most
+// rule blocks open with "early-return null" guards for fundamental gating,
+// then sum positive/negative modifiers reflecting how much the actor
+// *wants* this with the current state.
+
+const VOLITION_RULES = {
+  "small-talk": (a, o, s) => {
+    if (a.act !== "ACT_ONE") return null;
+    let v = 5;
+    if (o.tension?.[a.id] >= 20) v += 3;     // smooths things
+    if (a.relationships?.[o.id] === "enemies") v -= 8;
+    return v;
+  },
+
+  "compliment": (a, o, s) => {
+    if (a.act !== "ACT_ONE") return null;
+    let v = 4;
+    if (a.traits.includes("charismatic")) v += 2;
+    if (o.traits.includes("vain"))         v += 3;  // loves it
+    if (o.tension?.[a.id] >= 15)            v += 3;  // smooth
+    if (a.relationships?.[o.id] === "enemies") v -= 6;
+    return v;
+  },
+
+  "share-interest": (a, o, s) => {
+    if (a.act !== "ACT_ONE") return null;
+    const shared = (a.likes ?? []).filter(id => (o.likes ?? []).includes(id));
+    const coolShared = shared.filter(id => (s.entities[id]?.coolness ?? 0) >= 0);
+    if (coolShared.length === 0) return null;
+    let v = 5 + coolShared.length * 2;
+    if (a.traits.includes("thoughtful")) v += 2;
+    return v;
+  },
+
+  "bond-over-lame": (a, o, s) => {
+    if (a.act !== "ACT_ONE") return null;
+    const shared = (a.likes ?? []).filter(id => (o.likes ?? []).includes(id));
+    const lameShared = shared.filter(id => (s.entities[id]?.coolness ?? 0) < 0);
+    if (lameShared.length === 0) return null;
+    let v = 7 + lameShared.length * 3;
+    if (a.traits.includes("authentic")) v += 3;
+    if (o.traits.includes("vain")) v -= 4;  // they care what people think
+    return v;
+  },
+
+  "sincere-compliment": (a, o, s) => {
+    if (a.act !== "ACT_ONE") return null;
+    let v = 4;
+    if (o.tension?.[a.id] >= 10) v += 4;
+    if (o.traits.includes("authentic")) v += 3;
+    if (o.traits.includes("guarded"))   v += 2;  // disarms
+    return v;
+  },
+
+  "flirt-soft": (a, o, s) => {
+    if (a.act !== "ACT_ONE") return null;
+    if (a.relationships?.[o.id] === "enemies") return null;
+    let v = 3;
+    if ((a.romance?.[o.id] ?? 0) >= 8)  v += 4;
+    if ((o.romance?.[a.id] ?? 0) >= 8)  v += 4;
+    if (a.traits.includes("charismatic")) v += 2;
+    if (o.tension?.[a.id] >= 25) v -= 6;
+    return v;
+  },
+
+  "flirt-bold": (a, o, s) => {
+    if (a.act !== "ACT_ONE") return null;
+    if (a.relationships?.[o.id] === "enemies") return null;
+    if ((a.romance?.[o.id] ?? 0) < 10) return null;   // hard prereq
+    let v = 4;
+    if ((o.romance?.[a.id] ?? 0) >= 20) v += 8;
+    if (a.traits.includes("charismatic")) v += 3;
+    if (a.traits.includes("impulsive"))   v += 2;
+    if (o.tension?.[a.id] >= 25) v -= 12;
+    if (o.traits.includes("guarded"))   v -= 3;
+    return v;
+  },
+
+  "confide-secret": (a, o, s) => {
+    if (a.act !== "ACT_ONE") return null;
+    if ((a.buddy?.[o.id] ?? 0) < 20) return null;
+    let v = 5;
+    if ((o.buddy?.[a.id] ?? 0) >= 30) v += 5;
+    if (a.relationships?.[o.id] === "friends") v += 4;
+    if (o.tension?.[a.id] >= 20) v -= 5;
+    if (a.traits.includes("guarded")) v -= 2;
+    return v;
+  },
+
+  "ask-out": (a, o, s) => {
+    if (a.act !== "ACT_ONE") return null;
+    if ((a.romance?.[o.id] ?? 0) < 25) return null;
+    if ((a.buddy?.[o.id]   ?? 0) < 25) return null;
+    let v = 6;
+    if ((o.romance?.[a.id] ?? 0) >= 30) v += 8;
+    if ((o.buddy?.[a.id]   ?? 0) >= 30) v += 4;
+    if (a.traits.includes("ambitious")) v += 2;
+    if (o.tension?.[a.id] >= 15) v -= 10;
+    return v;
+  },
+
+  "debate-target": (a, o, s) => {
+    if (a.act !== "ACT_ONE") return null;
+    let v = 4;
+    if (a.traits.includes("intellectual")) v += 4;
+    if (o.traits.includes("intellectual")) v += 4;
+    if (o.traits.includes("witty"))        v += 2;
+    if (o.tension?.[a.id] >= 30) v -= 5;
+    return v;
+  },
+
+  "confront": (a, o, s) => {
+    if (a.act !== "ACT_ONE") return null;
+    const tens = a.tension?.[o.id] ?? 0;
+    if (tens < 15) return null;
+    let v = 3 + Math.floor(tens / 4);
+    if (a.traits.includes("impulsive")) v += 2;
+    if (a.traits.includes("guarded"))   v -= 3;
+    return v;
+  },
+
+  "spread-rumor": (a, o, s) => {
+    if (a.act !== "ACT_ONE") return null;
+    if (a.relationships?.[o.id] === "friends") return null;
+    if (a.relationships?.[o.id] === "dating")  return null;
+    let v = -2;
+    if ((a.tension?.[o.id] ?? 0) >= 10) v += 8;
+    if (a.relationships?.[o.id] === "enemies") v += 6;
+    if (o.traits.includes("vain"))             v += 3;
+    if (a.traits.includes("loyal"))            v -= 5;
+    return v;
+  },
+
+  "apologize-deep": (a, o, s) => {
+    if (a.act !== "ACT_ONE") return null;
+    if ((o.tension?.[a.id] ?? 0) < 20) return null;
+    let v = 6 + Math.floor((o.tension?.[a.id] ?? 0) / 8);
+    if (a.traits.includes("helpful")) v += 2;
+    if (a.traits.includes("loyal"))   v += 2;
+    return v;
+  },
+
+  // ── Act 2 ──
+
+  "chat-prom": (a, o, s) => {
+    if (a.act !== "ACT_TWO") return null;
+    let v = 4;
+    if (a.relationships?.[o.id] === "enemies") v -= 6;
+    return v;
+  },
+
+  "ask-to-dance": (a, o, s) => {
+    if (a.act !== "ACT_TWO") return null;
+    let v = 3;
+    if ((a.buddy?.[o.id] ?? 0) >= 30) v += 5;
+    if (a.relationships?.[o.id] === "friends") v += 5;
+    if (a.relationships?.[o.id] === "dating")  v += 8;
+    if ((a.romance?.[o.id] ?? 0) >= 20) v += 3;
+    if ((o.tension?.[a.id] ?? 0) >= 20) v -= 8;
+    return v;
+  },
+
+  "slow-dance": (a, o, s) => {
+    if (a.act !== "ACT_TWO") return null;
+    if (a.relationships?.[o.id] !== "dating"
+        && ((a.romance?.[o.id] ?? 0) < 30 || (o.romance?.[a.id] ?? 0) < 25)) return null;
+    let v = 8;
+    if (a.relationships?.[o.id] === "dating") v += 10;
+    if ((o.romance?.[a.id] ?? 0) >= 40) v += 4;
+    return v;
+  },
+
+  "prom-confess": (a, o, s) => {
+    if (a.act !== "ACT_TWO") return null;
+    if ((a.romance?.[o.id] ?? 0) < 20) return null;
+    let v = 5;
+    if ((o.romance?.[a.id] ?? 0) >= 30) v += 10;
+    if (a.traits.includes("impulsive")) v += 3;
+    if ((o.tension?.[a.id] ?? 0) >= 25) v -= 12;
+    return v;
+  },
+
+  "public-declaration": (a, o, s) => {
+    if (a.act !== "ACT_TWO") return null;
+    if ((a.romance?.[o.id] ?? 0) < 40) return null;
+    let v = 4;
+    if ((o.romance?.[a.id] ?? 0) >= 50) v += 12;
+    if (a.relationships?.[o.id] === "dating") v += 4;
+    if (a.traits.includes("ambitious")) v += 3;
+    if (a.traits.includes("impulsive")) v += 3;
+    if ((o.tension?.[a.id] ?? 0) >= 15) v -= 20;
+    if (o.traits.includes("guarded")) v -= 4;
+    return v;
+  },
 };
+
+function computeVolition(state, actorID, otherID, actionName) {
+  const a = state.entities[actorID];
+  const o = state.entities[otherID];
+  const rule = VOLITION_RULES[actionName];
+  if (!a || !o || !rule) return null;
+  return rule(a, o, state);
+}
 
 // ── Initial state ───────────────────────────────────────────────────────────
 
@@ -171,13 +394,11 @@ function buildInitialState(EntityType) {
   const items = [];
   const locations = [];
 
-  // Locations
   for (const [id, name] of [["school", "Northside High"], ["prom", "The Prom"]]) {
     entities[id] = { entityType: EntityType.Location, id, name };
     locations.push(id);
   }
 
-  // Items
   for (const [id, def] of Object.entries(ITEM_DEFS)) {
     entities[id] = {
       entityType: EntityType.Item,
@@ -190,7 +411,6 @@ function buildInitialState(EntityType) {
     items.push(id);
   }
 
-  // Characters
   for (const [id, def] of Object.entries(CHARACTER_DEFS)) {
     const networks = INITIAL_NETWORKS[id] ?? {};
     const buddy = {}, romance = {}, cool = {}, tension = {};
@@ -215,8 +435,6 @@ function buildInitialState(EntityType) {
       relationships: { ...(INITIAL_RELATIONSHIPS[id] ?? {}) },
       statuses: { popular: false, embarrassed: false, crush: {} },
       buddy, romance, cool, tension,
-      // Alex-only — null on others, set per turn by the host.
-      intent: null,
       act: null,
     };
     characters.push(id);
@@ -235,10 +453,7 @@ function buildInitialState(EntityType) {
   };
 }
 
-function clamp(v) {
-  if (v == null) return v;
-  return Math.max(-100, Math.min(100, v));
-}
+function clamp(v) { return v == null ? v : Math.max(-100, Math.min(100, v)); }
 
 function clampNetworks(state) {
   const keys = ["buddy", "romance", "cool", "tension"];
@@ -268,17 +483,22 @@ export async function runSim(runtime, bundle, seedStr, tickCount) {
 
     const targets = game.getCandidateTargets();
     const target = targets[Math.floor(rng() * targets.length)];
-    const intents = Object.keys(INTENTS);
-    const intent = intents[Math.floor(rng() * intents.length)];
-
-    const result = await game.takeTurn(target, intent);
-    const events = [];
-    if (result.intent)   events.push({ text: result.intent.gloss,   type: "intent"   });
-    if (result.exchange) events.push({ text: result.exchange.gloss, type: "exchange" });
-    if (result.response) events.push({ text: result.response.gloss, type: "response" });
-    for (const t of result.triggers ?? []) {
-      events.push({ text: t.gloss, type: "trigger" });
+    const available = game.getAvailableActions(target);
+    if (available.length === 0) {
+      ticks.push({ index: i, timestamp: i + 1, events: [{ text: `(no moves available toward ${target})`, type: "skip" }], relationship: game.getSnapshot(target), actNumber: game.getState().actNumber });
+      // Force end-of-turn anyway so we don't infinite-loop in Node.
+      await game.skipTurn();
+      continue;
     }
+    // Weighted-ish: pick from top half by volition for more interesting runs.
+    const top = available.slice(0, Math.max(1, Math.ceil(available.length / 2)));
+    const action = top[Math.floor(rng() * top.length)];
+
+    const result = await game.takeTurn(action.name, target);
+    const events = [];
+    events.push({ text: `${action.label} → ${result.exchange?.gloss ?? "(?)"}`, type: "intent" });
+    if (result.response) events.push({ text: result.response.gloss, type: "response" });
+    for (const t of result.triggers ?? []) events.push({ text: t.gloss, type: "trigger" });
 
     ticks.push({
       index: i,
@@ -320,39 +540,25 @@ export function getSnapshot(state, focusID) {
   };
 }
 
-// Prom outcome: examined when game ends. Looks at Alex's relationships
-// and feelings at prom's close to compute a "happy ending".
 export function checkOutcome(state) {
   if (state.actNumber < 2) return null;
   if (state.turn < ACT1_TURNS + ACT2_TURNS) return null;
   const alex = state.entities.alex;
-
-  // Did Alex end up dating someone?
   const datingPartner = Object.entries(alex.relationships).find(([_, v]) => v === "dating");
-  // Friend count
   const friends = Object.entries(alex.relationships).filter(([_, v]) => v === "friends").map(([k]) => k);
   const enemies = Object.entries(alex.relationships).filter(([_, v]) => v === "enemies").map(([k]) => k);
-
-  if (datingPartner) {
-    return { kind: "win-date", partner: datingPartner[0], friends, enemies };
-  }
-  if (friends.length >= 3) {
-    return { kind: "win-friends", friends, enemies };
-  }
-  if (enemies.length >= 2) {
-    return { kind: "lose-pariah", friends, enemies };
-  }
+  if (datingPartner) return { kind: "win-date", partner: datingPartner[0], friends, enemies };
+  if (friends.length >= 3) return { kind: "win-friends", friends, enemies };
+  if (enemies.length >= 2) return { kind: "lose-pariah", friends, enemies };
   return { kind: "neutral", friends, enemies };
 }
 
-// Per-character "vibe" label for UI.
 export function getCharacterVibe(state, otherID) {
   const alex = state.entities.alex;
   const buddy   = alex.buddy[otherID]   ?? 0;
   const romance = alex.romance[otherID] ?? 0;
   const tension = alex.tension[otherID] ?? 0;
   const rel = alex.relationships[otherID];
-
   if (rel === "dating")  return { label: "Dating",       cls: "rel-dating"  };
   if (rel === "enemies") return { label: "Enemies",      cls: "rel-enemies" };
   if (rel === "friends") {
@@ -378,10 +584,13 @@ export function initGame({ initializeVivRuntime, attemptAction, selectAction, En
     enums: {
       ACT_ONE: "ACT_ONE",
       ACT_TWO: "ACT_TWO",
-      WARM:    "WARM",
-      SPICY:   "SPICY",
-      BOLD:    "BOLD",
-      MEND:    "MEND",
+    },
+    functions: {
+      // Volition function — sums rule weights for the (actor, other, action)
+      // triple. Returns a number, or null when the action can't apply at all.
+      // Viv conditions guard on `~volition(...) > 0`.
+      volition: (actorID, otherID, actionName) =>
+        computeVolition(state, actorID, otherID, actionName),
     },
     getEntityView: (id) => structuredClone(state.entities[id]),
     getEntityLabel: (id) => state.entities[id]?.name ?? id,
@@ -447,16 +656,32 @@ export function initGame({ initializeVivRuntime, attemptAction, selectAction, En
     for (const iid of state.items)      state.entities[iid].location = locationID;
   }
 
+  function listAvailableActions(targetID) {
+    if (!targetID || targetID === "alex") return [];
+    const out = [];
+    for (const def of ACTION_CATALOG) {
+      const v = computeVolition(state, "alex", targetID, def.name);
+      if (v == null || v <= 0) continue;
+      out.push({ ...def, volition: v });
+    }
+    out.sort((a, b) => b.volition - a.volition);
+    return out;
+  }
+
+  async function advanceActIfNeeded() {
+    if (state.actNumber === 1 && state.turn >= ACT1_TURNS) {
+      await fireScene("act2-opens", "alex");
+      moveAllTo("prom");
+      state.actNumber = 2;
+    }
+  }
+
   return {
     state,
 
     async start() {
       const opening = await fireScene("act1-opens", "alex");
-      return {
-        opening: opening[0] ?? null,
-        actNumber: state.actNumber,
-        turn: state.turn,
-      };
+      return { opening: opening[0] ?? null, actNumber: state.actNumber, turn: state.turn };
     },
 
     getState() {
@@ -479,58 +704,48 @@ export function initGame({ initializeVivRuntime, attemptAction, selectAction, En
       return state.characters.filter(id => id !== "alex");
     },
 
-    getSnapshot(focusID) {
-      return getSnapshot(state, focusID);
+    getAvailableActions(targetID) {
+      return listAvailableActions(targetID);
     },
 
-    getCharacter(id) {
-      return state.entities[id];
-    },
+    getSnapshot(focusID) { return getSnapshot(state, focusID); },
+    getCharacter(id)     { return state.entities[id]; },
 
-    async takeTurn(targetID, intentKey) {
+    async takeTurn(actionName, targetID) {
       if (!state.entities[targetID] || targetID === "alex") {
         throw new Error(`Invalid target: ${targetID}`);
       }
-      if (!INTENTS[intentKey]) {
-        throw new Error(`Invalid intent: ${intentKey}`);
+      if (!VOLITION_RULES[actionName]) {
+        throw new Error(`Unknown action: ${actionName}`);
       }
-
-      state.entities.alex.intent = intentKey;
 
       const before = snapshotActions();
       await attemptAction({
-        actionName: "player-turn",
+        actionName,
         initiatorID: "alex",
         precastBindings: { alex: ["alex"], target: [targetID] },
       });
       const intentActions = newActionsSince(before);
+      if (intentActions.length === 0) {
+        throw new Error(`Action "${actionName}" blocked by Viv conditions (volition <= 0?).`);
+      }
 
-      // Drain urgent for both Alex (exchange selector + trigger queueing)
-      // and the target (response).
-      const alexUrgent   = await drainUrgent("alex");
-      const targetUrgent = await drainUrgent(targetID);
-      const alexFollowup = await drainUrgent("alex"); // triggers queued during exchange
+      await drainUrgent("alex");
+      await drainUrgent(targetID);
+      await drainUrgent("alex");
       clampNetworks(state);
 
       state.timestamp += 10;
       state.turn += 1;
 
-      // Filter out the structural meta-action `run-triggers` and the
-      // selector-driven dispatch from the surfaced events.
-      const allNew = [...intentActions, ...alexUrgent, ...targetUrgent, ...alexFollowup];
+      const allNew = newActionsSince(before);
       const exchange = allNew.find(a => isExchange(a.name));
       const response = allNew.find(a => isResponse(a.name));
       const triggers = allNew.filter(a => isTrigger(a.name));
 
-      // Act transition.
-      if (state.actNumber === 1 && state.turn >= ACT1_TURNS) {
-        await fireScene("act2-opens", "alex");
-        moveAllTo("prom");
-        state.actNumber = 2;
-      }
+      await advanceActIfNeeded();
 
       return {
-        intent: intentActions[0] ?? null,
         exchange,
         response,
         triggers,
@@ -539,25 +754,22 @@ export function initGame({ initializeVivRuntime, attemptAction, selectAction, En
         outcome: checkOutcome(state),
       };
     },
+
+    // Used by the headless runner when no action is available for a target.
+    async skipTurn() {
+      state.timestamp += 10;
+      state.turn += 1;
+      await advanceActIfNeeded();
+      return { actNumber: state.actNumber, outcome: checkOutcome(state) };
+    },
   };
 }
 
 // ── Action-name classifiers ─────────────────────────────────────────────────
 
-const EXCHANGE_NAMES = new Set([
-  "public-declaration", "slow-dance", "prom-confess", "ask-to-dance", "chat-prom",
-  "ask-out", "flirt-bold", "flirt-soft", "confide-secret",
-  "confront", "spread-rumor", "debate-target",
-  "apologize-deep", "sincere-compliment",
-  "share-interest", "bond-over-lame", "compliment", "small-talk",
-  "awkward-pause",
-]);
-const RESPONSE_NAMES = new Set([
-  "react-fuming", "react-thrilled", "react-icy", "react-warm", "react-cool",
-]);
-const TRIGGER_NAMES = new Set([
-  "become-friends", "become-dating", "become-enemies", "set-has-crush",
-]);
+const EXCHANGE_NAMES = new Set(ACTION_CATALOG.map(a => a.name));
+const RESPONSE_NAMES = new Set(["react-fuming", "react-thrilled", "react-icy", "react-warm", "react-cool"]);
+const TRIGGER_NAMES  = new Set(["become-friends", "become-dating", "become-enemies", "set-has-crush"]);
 
 function isExchange(n) { return EXCHANGE_NAMES.has(n); }
 function isResponse(n) { return RESPONSE_NAMES.has(n); }

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // Playwright test for promweek web UI.
 // Serves the repo over HTTP, opens the demo in headless Chromium,
-// drives the new target+intent+commit flow, and asserts each turn
-// produces a log entry.
+// clicks a target then the top-volition action each turn, and asserts
+// each turn produces a log entry.
 //
 // Usage:
-//   node scripts/test-web.mjs                              # 6 random turns
-//   node scripts/test-web.mjs jordan:SPICY sam:WARM ...    # specific sequence
+//   node scripts/test-web.mjs                          # 6 turns picking top action toward jordan
+//   node scripts/test-web.mjs jordan riley sam casey   # cycle targets, top action each turn
 
 import { chromium } from "playwright";
 import { createServer } from "http";
@@ -66,7 +66,6 @@ async function getLastLogEntry(page) {
   for (const t of triggerEls) triggers.push((await t.textContent()).trim());
   return {
     turn:     await last.locator(".log-turn").textContent().catch(() => ""),
-    player:   await last.locator(".log-player").textContent().catch(() => ""),
     exchange: await last.locator(".log-exchange").textContent().catch(() => null),
     response: await last.locator(".log-response").textContent().catch(() => null),
     triggers,
@@ -74,14 +73,7 @@ async function getLastLogEntry(page) {
 }
 
 const TARGETS = ["jordan", "riley", "sam", "casey"];
-const INTENTS = ["WARM", "SPICY", "BOLD", "MEND"];
-
-function parseTurn(arg) {
-  const [target, intent] = arg.split(":");
-  return { target, intent };
-}
-
-const requestedActions = process.argv.slice(2);
+const requestedTargets = process.argv.slice(2);
 
 const server = await serve();
 const browser = await chromium.launch({
@@ -90,18 +82,12 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage();
 
-const consoleLogs = [];
 page.on("console", msg => {
-  const type = msg.type();
-  const text = msg.text();
-  consoleLogs.push({ type, text });
-  if (type === "error" || type === "warn") {
-    console.error(`  [browser ${type}] ${text}`);
+  if (msg.type() === "error" || msg.type() === "warn") {
+    console.error(`  [browser ${msg.type()}] ${msg.text()}`);
   }
 });
-page.on("pageerror", err => {
-  console.error(`  [page error] ${err.message}`);
-});
+page.on("pageerror", err => console.error(`  [page error] ${err.message}`));
 
 console.log(`Serving ${ROOT} on http://127.0.0.1:${PORT}`);
 console.log("Opening http://127.0.0.1:7432/demos/promweek/index.html\n");
@@ -109,54 +95,48 @@ console.log("Opening http://127.0.0.1:7432/demos/promweek/index.html\n");
 await page.goto(`http://127.0.0.1:${PORT}/demos/promweek/index.html`);
 
 try {
-  await page.waitForSelector(".target-btn", { timeout: 10000 });
-  await page.waitForSelector(".intent-btn", { timeout: 5000 });
+  await page.waitForSelector(".cast-card", { timeout: 10000 });
 } catch {
-  console.error("FAIL: target/intent buttons never appeared — game did not load");
-  const status = await page.locator("#status").textContent().catch(() => "");
-  if (status) console.error("  status:", status);
+  console.error("FAIL: cast cards never appeared — game did not load");
   await browser.close();
   server.close();
   process.exit(1);
 }
 console.log("Game loaded.\n");
 
-const turns = requestedActions.length
-  ? requestedActions.map(parseTurn)
-  : Array.from({ length: 6 }, (_, i) => ({
-      target: TARGETS[i % TARGETS.length],
-      intent: INTENTS[i % INTENTS.length],
-    }));
+const targets = requestedTargets.length
+  ? requestedTargets
+  : Array(10).fill("jordan");
 
-for (let i = 0; i < turns.length; i++) {
-  const { target, intent } = turns[i];
+for (let i = 0; i < targets.length; i++) {
+  const target = targets[i];
 
-  const targetBtn = page.locator(".target-btn", { hasText: new RegExp(target, "i") }).first();
-  const intentBtn = page.locator(`.intent-btn.intent-${intent}`).first();
-
-  if (!(await targetBtn.isVisible().catch(() => false))) {
-    console.error(`  ✗ Target "${target}" not found`);
+  const targetCard = page.locator(".cast-card", { hasText: new RegExp(target, "i") }).first();
+  if (!(await targetCard.isVisible().catch(() => false))) {
+    console.error(`  ✗ Target "${target}" not visible`);
     break;
   }
-  if (!(await intentBtn.isVisible().catch(() => false))) {
-    console.error(`  ✗ Intent "${intent}" not found`);
-    break;
-  }
+  await targetCard.click();
 
-  await targetBtn.click();
-  await intentBtn.click();
+  // Wait for the action list to populate.
+  await page.waitForTimeout(50);
+  const actions = await page.locator(".action-btn").all();
+  if (actions.length === 0) {
+    console.log(`Turn ${i + 1}: (no available actions toward ${target})\n`);
+    continue;
+  }
+  // Top-volition action is the first one in the first non-empty group.
+  const topAction = actions[0];
+  const topLabel = (await topAction.locator(".action-label").textContent()).trim();
+  const topScore = (await topAction.locator(".action-score").textContent()).trim();
 
   const prevCount = await page.locator(".log-entry").count();
-
-  console.log(`Turn ${i + 1}: ${target} / ${intent}`);
-  await page.locator("#commit-btn").click();
+  console.log(`Turn ${i + 1}: → ${target} · "${topLabel}" (volition ${topScore})`);
+  await topAction.click();
 
   const result = await waitForTurnComplete(page, prevCount);
-
   if (!result) {
     console.error(`  ✗ TIMEOUT — no log entry after ${TURN_TIMEOUT_MS}ms`);
-    const statusText = await page.locator("#status").textContent().catch(() => "");
-    if (statusText) console.error(`  status: "${statusText}"`);
     break;
   }
   if (result.error) {
@@ -164,9 +144,7 @@ for (let i = 0; i < turns.length; i++) {
     console.error(`  ✗ ERROR — status: "${statusText}"`);
     break;
   }
-
   const entry = await getLastLogEntry(page);
-  console.log(`  player:   ${entry.player?.trim()}`);
   if (entry.exchange) console.log(`  exchange: ${entry.exchange.trim()}`);
   if (entry.response) console.log(`  response: ${entry.response.trim()}`);
   for (const t of entry.triggers ?? []) console.log(`  trigger:  ${t}`);
