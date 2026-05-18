@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // Playwright test for promweek web UI.
-// Serves the repo over HTTP, opens the demo in headless Chromium,
-// clicks a target then the top-volition action each turn, and asserts
+// Serves the repo over HTTP, opens the demo in headless Chromium, picks an
+// initiator + target each turn, clicks the top-volition action, and asserts
 // each turn produces a log entry.
 //
 // Usage:
-//   node scripts/test-web.mjs                          # 6 turns picking top action toward jordan
-//   node scripts/test-web.mjs jordan riley sam casey   # cycle targets, top action each turn
+//   node scripts/test-web.mjs                              # 10 turns alex→jordan default
+//   node scripts/test-web.mjs alex:jordan sam:casey ...    # custom initiator:target pairs
 
 import { chromium } from "playwright";
 import { createServer } from "http";
@@ -72,8 +72,8 @@ async function getLastLogEntry(page) {
   };
 }
 
-const TARGETS = ["jordan", "riley", "sam", "casey"];
-const requestedTargets = process.argv.slice(2);
+const DEFAULT_PAIRS = Array(10).fill(["alex", "jordan"]);
+const requestedPairs = process.argv.slice(2).map(s => s.split(":"));
 
 const server = await serve();
 const browser = await chromium.launch({
@@ -104,34 +104,58 @@ try {
 }
 console.log("Game loaded.\n");
 
-const targets = requestedTargets.length
-  ? requestedTargets
-  : Array(10).fill("jordan");
+const pairs = requestedPairs.length ? requestedPairs : DEFAULT_PAIRS;
 
-for (let i = 0; i < targets.length; i++) {
-  const target = targets[i];
-
-  const targetCard = page.locator(".cast-card", { hasText: new RegExp(target, "i") }).first();
-  if (!(await targetCard.isVisible().catch(() => false))) {
-    console.error(`  ✗ Target "${target}" not visible`);
-    break;
+async function clickCardByName(name) {
+  const card = page.locator(".cast-card", { hasText: new RegExp(`^\\s*[^A-Za-z]*${name}`, "i") }).first();
+  if (!(await card.isVisible().catch(() => false))) {
+    return false;
   }
-  await targetCard.click();
+  await card.click();
+  return true;
+}
 
-  // Wait for the action list to populate.
-  await page.waitForTimeout(50);
-  const actions = await page.locator(".action-btn").all();
+// Cycle through pairs; if a pair has no actions, fall back to scanning other
+// initiators against the same target to find any playable move.
+const CANDIDATE_INITIATORS = ["alex", "sam", "jordan", "casey", "riley"];
+
+for (let i = 0; i < pairs.length; i++) {
+  const [wantedInitiator, wantedTarget] = pairs[i];
+
+  // Always clear by clicking initiator first (the UI does first-click=initiator).
+  // To reset cleanly, click the Clear button if visible.
+  const clearBtn = page.locator("#clear-selection");
+  if (await clearBtn.isVisible().catch(() => false)) {
+    await clearBtn.click();
+  }
+
+  let initiator = wantedInitiator;
+  let target = wantedTarget;
+  let actions = [];
+
+  // Try the requested pair first, then scan other initiators.
+  const tryOrder = [wantedInitiator, ...CANDIDATE_INITIATORS.filter(c => c !== wantedInitiator)];
+  for (const cand of tryOrder) {
+    if (cand === wantedTarget) continue;
+    if (await clearBtn.isVisible().catch(() => false)) await clearBtn.click();
+    if (!(await clickCardByName(cand)))         { continue; }
+    if (!(await clickCardByName(wantedTarget))) { continue; }
+    await page.waitForTimeout(50);
+    actions = await page.locator(".action-btn").all();
+    if (actions.length > 0) { initiator = cand; target = wantedTarget; break; }
+  }
+
   if (actions.length === 0) {
-    console.log(`Turn ${i + 1}: (no available actions toward ${target})\n`);
+    console.log(`Turn ${i + 1}: (no available actions for any initiator → ${wantedTarget})\n`);
     continue;
   }
-  // Top-volition action is the first one in the first non-empty group.
+
   const topAction = actions[0];
   const topLabel = (await topAction.locator(".action-label").textContent()).trim();
   const topScore = (await topAction.locator(".action-score").textContent()).trim();
 
   const prevCount = await page.locator(".log-entry").count();
-  console.log(`Turn ${i + 1}: → ${target} · "${topLabel}" (volition ${topScore})`);
+  console.log(`Turn ${i + 1}: ${initiator} → ${target} · "${topLabel}" (volition ${topScore})`);
   await topAction.click();
 
   const result = await waitForTurnComplete(page, prevCount);
