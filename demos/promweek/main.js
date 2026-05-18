@@ -19,6 +19,10 @@ const outcomeEl      = document.getElementById("outcome");
 const actLabelEl     = document.getElementById("act-label");
 const subtitleEl     = document.getElementById("subtitle");
 const alexStatusesEl = document.getElementById("alex-statuses");
+const goalSectionEl  = document.getElementById("goal-section");
+const goalTitleEl    = document.getElementById("goal-title");
+const goalFlavorEl   = document.getElementById("goal-flavor");
+const goalHintEl     = document.getElementById("goal-hint");
 
 function setStatus(msg, isError = false) {
   statusEl.textContent = msg;
@@ -178,10 +182,24 @@ function showOutcome(outcome) {
       icon = "🤷"; title = "Just another night.";
       body = `Prom came and went. Some moments stood out. Most didn't.`;
   }
+
+  const goal = game.getGoal();
+  const goalAchieved = goal.check(game.state, outcome);
+  const goalResultText = goalAchieved
+    ? goal.successText(game.state, outcome)
+    : goal.failText;
+  const goalResultClass = goalAchieved ? "goal-achieved" : "goal-failed";
+  const goalResultIcon  = goalAchieved ? "✓" : "✗";
+
   outcomeEl.innerHTML = `
     <div class="outcome-icon">${icon}</div>
     <div class="outcome-title">${title}</div>
     <div class="outcome-body">${body}</div>
+    <div class="outcome-goal ${goalResultClass}">
+      <span class="outcome-goal-icon">${goalResultIcon}</span>
+      <span class="outcome-goal-label">${goal.title}:</span>
+      ${goalResultText}
+    </div>
     <button id="outcome-replay">Play again</button>
   `;
   document.getElementById("outcome-replay").addEventListener("click", () => startGame());
@@ -235,6 +253,13 @@ async function startGame() {
   try {
     game = initGame(runtime, bundle);
     const startInfo = await game.start();
+
+    const goal = game.getGoal();
+    goalTitleEl.textContent  = goal.title;
+    goalFlavorEl.textContent = goal.flavor;
+    goalHintEl.textContent   = goal.hint;
+    goalSectionEl.className  = "goal-section";
+
     const state = game.getState();
     renderActHeader(state.actNumber, state.turn);
     renderCast(state);
