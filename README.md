@@ -5,7 +5,8 @@ Browser demos for the [Viv](https://github.com/siftystudio/viv) emergent-narrati
 ## Demos
 
 - **01-hello-world** — three characters in a tavern who greet each other
-- **mmo** — a solo adventurer wandering zones, scouting enemies, and fighting
+- **mmo** — the game, the players and their online communities
+- **promweek** - promweek remake focused on viv integration
 
 Open `index.html` to browse them, or view them on GitHub Pages.
 
