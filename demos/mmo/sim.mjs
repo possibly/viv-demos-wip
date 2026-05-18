@@ -276,11 +276,17 @@ export function copperToString(total) {
 }
 
 function generateLoot(rng, enemy) {
-  const result = { copper: 0, item: null };
+  const result = { copper: 0, items: [] };
   if (enemy.type !== "humanoid" || enemy.level > 5) return result;
   if (rng() < 0.4) result.copper = Math.floor(rng() * 3) + 1;
-  if (rng() < 0.3) result.item = pickRandom(rng, WEAK_LOOT_ITEMS);
+  if (rng() < 0.3) result.items.push(pickRandom(rng, WEAK_LOOT_ITEMS));
   return result;
+}
+
+function formatLootSummary(items, copper) {
+  const parts = items.map(it => it.name);
+  if (copper > 0) parts.push(`${copper} copper`);
+  return parts.length > 0 ? parts.join(", ") : "nothing";
 }
 
 function spawnChest(config, EntityType, rng, state) {
@@ -681,20 +687,19 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       const combatBindings = { adventurer: ["adventurer"], enemy: [enemyId] };
 
       if (playerWins) {
-        // Generate loot before kill fires so the kill reaction can queue loot-item
+        // Build the enemy's loot bundle (items + copper) and attach it to the enemy entity so the
+        // kill reaction can queue loot-all when @enemy.hasLoot is true.
         const loot = generateLoot(rng, enemy);
-        let lootItemId = null;
-        if (loot.item) {
-          lootItemId = makeUUID(rng);
-          state.entities[lootItemId] = { entityType: EntityType.Item, id: lootItemId, location: locationID, ...loot.item };
-          state.items.push(lootItemId);
-          adventurer.pendingLootId = lootItemId;
-          adventurer.shouldEquipLoot = loot.item.powerLevel > (adventurer.equipment[loot.item.slot]?.powerLevel ?? 0);
-          adventurer.pendingEquipSlot = loot.item.slot;
-        } else {
-          adventurer.pendingLootId = false;
-          adventurer.shouldEquipLoot = false;
-        }
+        const lootItemEntities = loot.items.map(it => {
+          const id = makeUUID(rng);
+          state.entities[id] = { entityType: EntityType.Item, id, location: locationID, ...it };
+          state.items.push(id);
+          return state.entities[id];
+        });
+        enemy.lootItems = lootItemEntities.map(e => e.id);
+        enemy.lootCopper = loot.copper;
+        enemy.lootSummary = formatLootSummary(lootItemEntities, loot.copper);
+        enemy.hasLoot = lootItemEntities.length > 0 || loot.copper > 0;
 
         const killBefore = new Set(state.actions);
         await attemptAction({ actionName: "kill", initiatorID: "adventurer", precastBindings: combatBindings, suppressConditions: true });
@@ -720,7 +725,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
           }
         }
 
-        // Drain all urgent reactions: level-up → loot-item → equip-item
+        // Drain urgent reactions queued by kill: level-up and loot-all.
         while (true) {
           const urgentBefore = new Set(state.actions);
           await selectAction({ initiatorID: "adventurer", urgentOnly: true });
@@ -728,33 +733,40 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
           if (urgentNew.length === 0) break;
           urgentNew.forEach(id => {
             const a = state.entities[id];
-            const evType = (a.name === "loot-item" || a.name === "equip-item") ? "loot" : "victory";
+            const evType = a.name === "loot-all" ? "loot" : "victory";
             events.push({ text: a.report ?? a.gloss ?? "(action)", type: evType });
-            if (a.name === "loot-item" && lootItemId) {
-              const item = state.entities[lootItemId];
-              if (item) {
-                adventurer.inventory = [...(adventurer.inventory ?? []), item];
+            if (a.name === "loot-all") {
+              for (const itemId of enemy.lootItems) {
+                adventurer.inventory = [...(adventurer.inventory ?? []), state.entities[itemId]];
               }
-            }
-            if (a.name === "equip-item" && lootItemId) {
-              const slot = adventurer.pendingEquipSlot;
-              const item = state.entities[lootItemId];
-              if (slot && item) {
-                const displaced = adventurer.equipment[slot];
-                if (displaced) {
-                  adventurer.inventory = [...(adventurer.inventory ?? []), { ...displaced, slot }];
-                }
-                adventurer.equipment[slot] = { name: item.name, powerLevel: item.powerLevel };
-                adventurer.inventory = (adventurer.inventory ?? []).filter(i => i !== item);
-              }
+              adventurer.copper = (adventurer.copper ?? 0) + (enemy.lootCopper ?? 0);
             }
           });
         }
 
-        // Copper drop is a simple JS-level event (not in action graph)
-        if (loot.copper > 0) {
-          adventurer.copper = (adventurer.copper ?? 0) + loot.copper;
-          events.push({ text: `${adventurer.name} picks up ${loot.copper} copper.`, type: "loot" });
+        // Equip each upgraded item from the bundle — one equip-item event per upgrade.
+        for (const itemId of enemy.lootItems) {
+          const item = state.entities[itemId];
+          const currentPower = adventurer.equipment[item.slot]?.powerLevel ?? 0;
+          if (item.powerLevel > currentPower) {
+            const equipBefore = new Set(state.actions);
+            await attemptAction({
+              actionName: "equip-item",
+              initiatorID: "adventurer",
+              precastBindings: { adventurer: ["adventurer"], item: [itemId] },
+              suppressConditions: true,
+            });
+            state.actions.filter(id => !equipBefore.has(id)).forEach(id => {
+              const a = state.entities[id];
+              events.push({ text: a.report ?? a.gloss ?? "(action)", type: "loot" });
+            });
+            const displaced = adventurer.equipment[item.slot];
+            if (displaced) {
+              adventurer.inventory = [...(adventurer.inventory ?? []), { ...displaced, slot: item.slot }];
+            }
+            adventurer.equipment[item.slot] = { name: item.name, powerLevel: item.powerLevel };
+            adventurer.inventory = (adventurer.inventory ?? []).filter(i => i.id !== itemId);
+          }
         }
       } else {
         const retreatBefore = new Set(state.actions);
@@ -782,50 +794,52 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
           const enemyTemplate = ENEMY_TEMPLATES[chosen.id];
 
           if (chosenEntity?.isChest) {
-            // Chest discovered — fire loot-chest + equip-item (urgent) on this same tick.
+            // Chest discovered — fire loot-chest-all + per-upgrade equip-item on this same tick.
             const chest = chosenEntity;
             events.push({ text: `${adventurer.name} discovers a ${chest.name} in ${zoneName}!`, type: "scouting" });
 
+            const chestItemEntities = chest.lootItems.map(id => state.entities[id]);
+            chest.lootSummary = formatLootSummary(chestItemEntities, 0);
+
+            const lootBefore = new Set(state.actions);
+            await attemptAction({
+              actionName: "loot-chest-all",
+              initiatorID: "adventurer",
+              precastBindings: { adventurer: ["adventurer"], chest: [chest.id] },
+              suppressConditions: true,
+            });
+            state.actions.filter(id => !lootBefore.has(id)).forEach(id => {
+              const a = state.entities[id];
+              events.push({ text: a.report ?? a.gloss ?? "(action)", type: "loot" });
+            });
+
+            // All chest items go to inventory first; equip-item below will move upgrades to equipment.
+            for (const itemId of chest.lootItems) {
+              adventurer.inventory = [...(adventurer.inventory ?? []), state.entities[itemId]];
+            }
+
+            // Equip each upgrade — one equip-item event per upgrade.
             for (const itemId of chest.lootItems) {
               const item = state.entities[itemId];
-              adventurer.pendingLootId = itemId;
-              adventurer.shouldEquipLoot = item.powerLevel > (adventurer.equipment[item.slot]?.powerLevel ?? 0);
-              adventurer.pendingEquipSlot = item.slot;
-
-              const lootChestBefore = new Set(state.actions);
-              await attemptAction({
-                actionName: "loot-chest",
-                initiatorID: "adventurer",
-                precastBindings: { adventurer: ["adventurer"], item: [itemId], chest: [chest.id] },
-                suppressConditions: true,
-              });
-              state.actions.filter(id => !lootChestBefore.has(id)).forEach(id => {
-                const a = state.entities[id];
-                events.push({ text: a.report ?? a.gloss ?? "(action)", type: "loot" });
-              });
-
-              // All chest items go to inventory first; equip-item will move upgrades to equipment.
-              adventurer.inventory = [...(adventurer.inventory ?? []), item];
-
-              // Drain urgent: equip-item fires if loot-chest queued it (item is an upgrade).
-              while (true) {
-                const urgentBefore = new Set(state.actions);
-                await selectAction({ initiatorID: "adventurer", urgentOnly: true });
-                const urgentNew = state.actions.filter(id => !urgentBefore.has(id));
-                if (urgentNew.length === 0) break;
-                urgentNew.forEach(id => {
+              const currentPower = adventurer.equipment[item.slot]?.powerLevel ?? 0;
+              if (item.powerLevel > currentPower) {
+                const equipBefore = new Set(state.actions);
+                await attemptAction({
+                  actionName: "equip-item",
+                  initiatorID: "adventurer",
+                  precastBindings: { adventurer: ["adventurer"], item: [itemId] },
+                  suppressConditions: true,
+                });
+                state.actions.filter(id => !equipBefore.has(id)).forEach(id => {
                   const a = state.entities[id];
                   events.push({ text: a.report ?? a.gloss ?? "(action)", type: "loot" });
-                  if (a.name === "equip-item") {
-                    const slot = item.slot;
-                    const displaced = adventurer.equipment[slot];
-                    if (displaced) {
-                      adventurer.inventory = [...(adventurer.inventory ?? []), { ...displaced, slot }];
-                    }
-                    adventurer.equipment[slot] = { name: item.name, powerLevel: item.powerLevel };
-                    adventurer.inventory = (adventurer.inventory ?? []).filter(i => i !== item);
-                  }
                 });
+                const displaced = adventurer.equipment[item.slot];
+                if (displaced) {
+                  adventurer.inventory = [...(adventurer.inventory ?? []), { ...displaced, slot: item.slot }];
+                }
+                adventurer.equipment[item.slot] = { name: item.name, powerLevel: item.powerLevel };
+                adventurer.inventory = (adventurer.inventory ?? []).filter(i => i.id !== itemId);
               }
             }
 

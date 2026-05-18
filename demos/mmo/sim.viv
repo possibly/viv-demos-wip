@@ -80,12 +80,11 @@ reserved action kill:
                     @cause: @enemy
                 urgent: true
         end
-        if @adventurer.pendingLootId:
-            queue action loot-item:
+        if @enemy.hasLoot:
+            queue action loot-all:
                 with:
                     @adventurer: @adventurer
                     @enemy: @enemy
-                    @item: @adventurer.pendingLootId?
                 urgent: true
         end
 
@@ -163,45 +162,23 @@ reserved action spawn-chest:
         @zone:
             as: location
 
-reserved action loot-item:
-    gloss: "@adventurer loots @item from @enemy"
+reserved action loot-all:
+    gloss: "@adventurer loots @enemy ({@enemy.lootSummary})"
     roles:
         @adventurer:
             as: initiator
-        @item:
-            as: item
         @enemy:
             as: recipient
     effects:
-        @adventurer.pendingLootId = false
-    reactions:
-        if @adventurer.shouldEquipLoot:
-            queue action equip-item:
-                with:
-                    @adventurer: @adventurer
-                    @item: @item
-                urgent: true
-        end
+        @enemy.hasLoot = false
 
-reserved action loot-chest:
-    gloss: "@adventurer loots @item from @chest"
+reserved action loot-chest-all:
+    gloss: "@adventurer loots @chest ({@chest.lootSummary})"
     roles:
         @adventurer:
             as: initiator
-        @item:
-            as: item
         @chest:
             as: item
-    effects:
-        @adventurer.pendingLootId = false
-    reactions:
-        if @adventurer.shouldEquipLoot:
-            queue action equip-item:
-                with:
-                    @adventurer: @adventurer
-                    @item: @item
-                urgent: true
-        end
 
 reserved action equip-item:
     gloss: "@adventurer equips @item"
