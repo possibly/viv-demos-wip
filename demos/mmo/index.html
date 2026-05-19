@@ -34,6 +34,7 @@
         <button id="btn-prev" class="timeline-btn" disabled>← Prev</button>
         <span id="tick-label" class="tick-label"></span>
         <button id="btn-next" class="timeline-btn">Next →</button>
+        <button id="btn-jump" class="timeline-btn">Jump</button>
       </div>
 
       <div class="pane-grid">
@@ -48,6 +49,19 @@
       </div>
     </section>
   </main>
+
+  <div id="jump-modal" class="modal" hidden>
+    <div class="modal-backdrop" id="jump-modal-backdrop"></div>
+    <div class="modal-dialog jump-dialog">
+      <button class="modal-close" id="jump-modal-close">&times;</button>
+      <div class="modal-section-title">Jump to Tick</div>
+      <div class="jump-input-row">
+        <input id="jump-tick-input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="1">
+        <button id="btn-jump-go">Go</button>
+      </div>
+      <p id="jump-error" class="jump-error" hidden></p>
+    </div>
+  </div>
 
   <div id="char-modal" class="modal" hidden>
     <div class="modal-backdrop" id="modal-backdrop"></div>

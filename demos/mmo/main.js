@@ -14,7 +14,12 @@ const simViewEl   = document.getElementById("sim-view");
 const tickLabelEl = document.getElementById("tick-label");
 const btnPrev     = document.getElementById("btn-prev");
 const btnNext     = document.getElementById("btn-next");
+const btnJump     = document.getElementById("btn-jump");
 const btnRun      = document.getElementById("btn-run");
+const jumpModalEl = document.getElementById("jump-modal");
+const jumpTickInput = document.getElementById("jump-tick-input");
+const jumpErrorEl = document.getElementById("jump-error");
+const btnJumpGo   = document.getElementById("btn-jump-go");
 const eventsEl    = document.getElementById("events");
 const seedInput   = document.getElementById("seed-input");
 const stepsInput  = document.getElementById("steps-input");
@@ -345,12 +350,46 @@ async function runSimulation() {
   }
 }
 
+function openJumpModal() {
+  jumpTickInput.value = String(currentTick + 1);
+  jumpErrorEl.hidden = true;
+  jumpModalEl.hidden = false;
+  jumpTickInput.select();
+}
+
+function closeJumpModal() {
+  jumpModalEl.hidden = true;
+}
+
+function commitJump() {
+  const val = parseInt(jumpTickInput.value, 10);
+  const max = simData.ticks.length;
+  if (!Number.isInteger(val) || val < 1 || val > max) {
+    jumpErrorEl.textContent = `Enter a number between 1 and ${max}.`;
+    jumpErrorEl.hidden = false;
+    return;
+  }
+  currentTick = val - 1;
+  render();
+  closeJumpModal();
+}
+
 document.getElementById("modal-backdrop").addEventListener("click", () => { charModalEl.hidden = true; modalCharId = null; });
 document.getElementById("modal-close").addEventListener("click", () => { charModalEl.hidden = true; modalCharId = null; });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !charModalEl.hidden) { charModalEl.hidden = true; modalCharId = null; } });
+document.getElementById("jump-modal-backdrop").addEventListener("click", closeJumpModal);
+document.getElementById("jump-modal-close").addEventListener("click", closeJumpModal);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    if (!jumpModalEl.hidden) { closeJumpModal(); return; }
+    if (!charModalEl.hidden) { charModalEl.hidden = true; modalCharId = null; }
+  }
+});
 
 btnRun.addEventListener("click", runSimulation);
 btnPrev.addEventListener("click", () => { if (currentTick > 0) { currentTick--; render(); } });
 btnNext.addEventListener("click", () => { if (currentTick < simData.ticks.length - 1) { currentTick++; render(); } });
+btnJump.addEventListener("click", openJumpModal);
+btnJumpGo.addEventListener("click", commitJump);
+jumpTickInput.addEventListener("keydown", (e) => { if (e.key === "Enter") commitJump(); });
 seedInput.addEventListener("keydown",  (e) => { if (e.key === "Enter") runSimulation(); });
 stepsInput.addEventListener("keydown", (e) => { if (e.key === "Enter") runSimulation(); });
