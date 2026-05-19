@@ -6,7 +6,7 @@ export {
   VENDOR_ARNAULT, QUARTERMASTER_RHYS, ALL_VENDORS, QUEST_GIVERS_BY_ZONE, VENDORS_BY_ZONE,
   QUEST_ITEMS, QUESTS,
   ENEMY_TEMPLATES, ZONE_ENEMIES, ZONE_DISCOVERABLES,
-  HOSTILE_ZONES, LEVEL_RANGE_POWER, CHEST_CONFIGS, WEAK_LOOT_ITEMS,
+  HOSTILE_ZONES, CHEST_CONFIGS, ITEM_DB, ZONE_LOOT_POOLS, NAMED_POOLS, CLASS_ARMOR_TYPES,
   EQUIPMENT_SLOTS, SLOT_LABELS,
   WANDERING_TRADER_CONFIGS,
 } from "./core/data.mjs";
@@ -23,10 +23,11 @@ import {
   ENEMY_TEMPLATES, ZONE_DISCOVERABLES,
   CHEST_CONFIGS,
   WANDERING_TRADER_CONFIGS,
+  ZONE_LOOT_POOLS, CLASS_ARMOR_TYPES,
 } from "./core/data.mjs";
 import { questXpReward, pickQuestForAdventurer, initialFactionRep, factionRepPerQuest } from "./core/quests.mjs";
 import { getAvgEquipmentPower, combatWinChance, generateLoot, formatLootSummary } from "./core/combat.mjs";
-import { itemSellPrice, copperToString, spawnChest } from "./core/items.mjs";
+import { itemSellPrice, copperToString, spawnChest, queryItems } from "./core/items.mjs";
 import { getLevel, buildInitialState, PLAYER_IDS } from "./core/character.mjs";
 import { mulberry32, hashSeed, makeUUID, pickRandom, setIn } from "./core/utils.mjs";
 import {
@@ -140,8 +141,12 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
   }
 
   async function equipFromList(player, itemIds, events) {
+    const allowedMaterials = CLASS_ARMOR_TYPES[player.class];
     for (const itemId of itemIds) {
       const item = state.entities[itemId];
+      if (!item?.slot) continue;
+      // Skip armor the player's class cannot wear; weapons/jewelry (material null) always pass.
+      if (item.material && allowedMaterials && !allowedMaterials.includes(item.material)) continue;
       const currentPower = player.equipment[item.slot]?.powerLevel ?? 0;
       if (item.powerLevel > currentPower) {
         player.shouldEquipLoot = true;
@@ -152,7 +157,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         });
         const displaced = player.equipment[item.slot];
         if (displaced) player.inventory = [...player.inventory, { ...displaced, slot: item.slot }];
-        player.equipment[item.slot] = { name: item.name, powerLevel: item.powerLevel };
+        player.equipment[item.slot] = { name: item.name, powerLevel: item.powerLevel, material: item.material ?? null };
         player.inventory = player.inventory.filter(i => i.id !== itemId);
       }
     }
@@ -624,12 +629,15 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     adventurer.canSellItems = sellableItems.length > 0 && allVendorsHere.length > 0;
 
     const buyableCandidates = [];
+    const buyerAllowedMaterials = CLASS_ARMOR_TYPES[adventurer.class];
     for (const vendor of allVendorsHere) {
       const playerRep = vendor.factionId ? (adventurer.factionRelationships[vendor.factionId] ?? 0) : null;
       for (const vi of vendor.items) {
         // Faction-gated stock: an item only appears in the candidate pool if the player
         // has met its required rep with this vendor's faction.
         if (vi.requiredRep && (playerRep === null || playerRep < vi.requiredRep)) continue;
+        // Material restriction: skip armor the player's class cannot wear.
+        if (vi.material && buyerAllowedMaterials && !buyerAllowedMaterials.includes(vi.material)) continue;
         const currentPower = adventurer.equipment[vi.slot]?.powerLevel ?? 0;
         if (vi.powerLevel > currentPower && vi.cost <= (adventurer.copper ?? 0)) {
           buyableCandidates.push({ item: vi, vendor });
@@ -660,12 +668,22 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       if (playerWins) {
         applyXpAwardForKill(adventurer, enemy, events);
 
-        const loot = generateLoot(rng, enemy);
+        const zoneLootPool = ZONE_LOOT_POOLS[locationID];
+        const allowedMaterials = CLASS_ARMOR_TYPES[adventurer.class];
+        const loot = generateLoot(rng, enemy, zoneLootPool, allowedMaterials);
         const lootItemEntities = loot.items.map(it => {
-          const id = makeUUID(rng);
-          state.entities[id] = { entityType: EntityType.Item, id, location: locationID, ...it };
-          state.items.push(id);
-          return state.entities[id];
+          const entityId = makeUUID(rng);
+          state.entities[entityId] = {
+            entityType: EntityType.Item,
+            id: entityId,
+            name: it.name,
+            powerLevel: it.powerLevel,
+            slot: it.slot,
+            material: it.material ?? null,
+            location: locationID,
+          };
+          state.items.push(entityId);
+          return state.entities[entityId];
         });
         enemy.lootItems = lootItemEntities.map(e => e.id);
         enemy.lootCopper = loot.copper;
@@ -798,6 +816,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
           name: completedQuest.rewardItem.name,
           powerLevel: completedQuest.rewardItem.powerLevel,
           slot: completedQuest.rewardItem.slot,
+          material: completedQuest.rewardItem.material ?? null,
           location: locationID,
         };
         state.entities[rewardId] = item;
@@ -839,6 +858,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
           name: boughtItem.name,
           powerLevel: boughtItem.powerLevel,
           slot: boughtItem.slot,
+          material: boughtItem.material ?? null,
           location: locationID,
         };
         state.items.push(boughtItemId);
@@ -867,7 +887,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
                 if (displaced) {
                   adventurer.inventory = [...(adventurer.inventory ?? []), { ...displaced, slot }];
                 }
-                adventurer.equipment[slot] = { name: boughtEntity.name, powerLevel: boughtEntity.powerLevel };
+                adventurer.equipment[slot] = { name: boughtEntity.name, powerLevel: boughtEntity.powerLevel, material: boughtEntity.material ?? null };
                 adventurer.inventory = (adventurer.inventory ?? []).filter(i => i !== boughtEntity && i.id !== boughtItemId);
               }
             }

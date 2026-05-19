@@ -1,4 +1,5 @@
-import { WEAK_LOOT_ITEMS } from "./data.mjs";
+import { ITEM_DB } from "./data.mjs";
+import { queryItems } from "./items.mjs";
 import { pickRandom } from "./utils.mjs";
 
 export function getAvgEquipmentPower(char) {
@@ -15,11 +16,19 @@ export function combatWinChance(playerLevel, avgEquipPower, enemyLevel, enemyPow
   return -0.000417 * x ** 4 + 0.01083 * x ** 3 - 0.12957 * x ** 2 + 0.619157 * x;
 }
 
-export function generateLoot(rng, enemy) {
+// lootPool: pool descriptor for queryItems (e.g. { powerLevel: [1, 2] }).
+//           Falls back to the full ITEM_DB if absent or empty.
+// allowedMaterials: string[] | null — restricts armor drops to the looter's class types.
+export function generateLoot(rng, enemy, lootPool, allowedMaterials) {
   const result = { copper: 0, items: [] };
   if (enemy.type !== "humanoid" || enemy.level > 5) return result;
   if (rng() < 0.4) result.copper = Math.floor(rng() * 3) + 1;
-  if (rng() < 0.3) result.items.push(pickRandom(rng, WEAK_LOOT_ITEMS));
+  if (rng() < 0.3) {
+    const pool = lootPool ?? {};
+    const candidates = queryItems(pool, allowedMaterials);
+    const source = candidates.length > 0 ? candidates : ITEM_DB;
+    result.items.push(pickRandom(rng, source));
+  }
   return result;
 }
 
