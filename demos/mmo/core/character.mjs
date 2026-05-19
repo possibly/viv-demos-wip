@@ -9,13 +9,14 @@ export function getLevel(xp) {
   return 1;
 }
 
-export function generateCharacter(EntityType, rng) {
+export function generateCharacter(EntityType, rng, id, takenNames = new Set()) {
   const raceKey  = pickRandom(rng, Object.keys(RACE_CLASS));
   const classKey = pickRandom(rng, RACE_CLASS[raceKey]);
   const gender   = rng() < 0.5 ? "m" : "f";
-  const name     = pickRandom(rng, RACES[raceKey].names[gender]);
+  const pool = RACES[raceKey].names[gender].filter(n => !takenNames.has(n));
+  const name = pickRandom(rng, pool.length > 0 ? pool : RACES[raceKey].names[gender]);
   return {
-    id: "adventurer",
+    id,
     entityType: EntityType.Character,
     name, race: raceKey, class: classKey, gender,
     faction: RACES[raceKey].faction,
@@ -33,8 +34,15 @@ export function generateCharacter(EntityType, rng) {
     questHuntDone: false,
     questReadyToComplete: false,
     pendingQuestEligible: false,
+    partyId: null,
+    partyActive: false,
+    partyMembers: [],
+    partyLeaderId: null,
+    partyQuestId: null,
   };
 }
+
+export const PLAYER_IDS = ["adventurer", "adventurer2"];
 
 export function buildInitialState(EntityType) {
   const entities = {};
@@ -43,8 +51,15 @@ export function buildInitialState(EntityType) {
     entities[z.id] = { entityType: EntityType.Location, id: z.id, name: z.name, desc: z.desc };
     locations.push(z.id);
   }
-  const character = generateCharacter(EntityType, () => Math.random());
-  entities[character.id] = character;
+  const rngForChars = () => Math.random();
+  const takenNames = new Set();
+  const players = [];
+  for (const pid of PLAYER_IDS) {
+    const character = generateCharacter(EntityType, rngForChars, pid, takenNames);
+    takenNames.add(character.name);
+    entities[character.id] = character;
+    players.push(character.id);
+  }
   entities[QUEST_GIVER.id] = {
     entityType: EntityType.Character,
     id: QUEST_GIVER.id,
@@ -71,7 +86,9 @@ export function buildInitialState(EntityType) {
   entities["world"] = { entityType: EntityType.Character, id: "world", name: "The World", memories: {} };
   return {
     timestamp: 0, entities,
-    characters: [character.id, QUEST_GIVER.id, RANGER_VOSS.id, ...ALL_VENDORS.map(v => v.id), "world"], locations,
+    players,
+    characters: [...players, QUEST_GIVER.id, RANGER_VOSS.id, ...ALL_VENDORS.map(v => v.id), "world"],
+    locations,
     items: [], actions: [],
     vivInternalState: null,
     zoneEnemyStacks: {},
