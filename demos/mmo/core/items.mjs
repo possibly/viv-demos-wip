@@ -1,4 +1,4 @@
-import { EQUIPMENT_SLOTS, WEAK_LOOT_ITEMS } from "./data.mjs";
+import { EQUIPMENT_SLOTS, ITEM_DB, NAMED_POOLS, ZONE_MAP } from "./data.mjs";
 import { makeUUID, pickRandom } from "./utils.mjs";
 
 export function itemSellPrice(item) {
@@ -14,6 +14,47 @@ export function copperToString(total) {
   if (silver > 0) parts.push(`${silver}s`);
   if (copper > 0) parts.push(`${copper}c`);
   return parts.length > 0 ? parts.join(" ") : "0c";
+}
+
+// Query ITEM_DB using a pool descriptor.
+//
+// Pool forms:
+//   { ids: ["item_id", ...] }                     — specific items by id
+//   { named: "pool_name" }                        — expands via NAMED_POOLS
+//   { powerLevel: 2, slot: "head", material: "leather" }  — attribute filter
+//   { powerLevel: [1, 3] }                        — power range (inclusive)
+//
+// allowedMaterials: string[] | null
+//   When provided, items with a material are filtered to only those in the list.
+//   Items with material === null (weapons, jewelry) are always included.
+export function queryItems(pool, allowedMaterials = null) {
+  let candidates;
+
+  if (pool.ids) {
+    candidates = ITEM_DB.filter(it => pool.ids.includes(it.id));
+  } else if (pool.named) {
+    const ids = NAMED_POOLS[pool.named] ?? [];
+    candidates = ITEM_DB.filter(it => ids.includes(it.id));
+  } else {
+    candidates = ITEM_DB.filter(it => {
+      if (pool.slot && it.slot !== pool.slot) return false;
+      if (pool.material && it.material !== pool.material) return false;
+      if (pool.powerLevel !== undefined) {
+        if (Array.isArray(pool.powerLevel)) {
+          if (it.powerLevel < pool.powerLevel[0] || it.powerLevel > pool.powerLevel[1]) return false;
+        } else {
+          if (it.powerLevel !== pool.powerLevel) return false;
+        }
+      }
+      return true;
+    });
+  }
+
+  if (allowedMaterials) {
+    candidates = candidates.filter(it => !it.material || allowedMaterials.includes(it.material));
+  }
+
+  return candidates;
 }
 
 export function getStarterEquipment(classKey, raceKey) {
@@ -56,13 +97,18 @@ export function getStarterEquipment(classKey, raceKey) {
 
 export function spawnChest(config, EntityType, rng, state) {
   const zoneId = pickRandom(rng, config.spawnZones);
+  const zone = ZONE_MAP.get(zoneId);
+  const lootPool = zone ? { powerLevel: [zone.powerMin, zone.powerMax] } : { powerLevel: [2, 3] };
   const itemCount = Math.floor(rng() * (config.maxItems - config.minItems + 1)) + config.minItems;
+
+  // Chest items are not class-filtered at spawn time; material is stored on the item
+  // so equipFromList can enforce restrictions when the finder tries to equip them.
+  const candidates = queryItems(lootPool);
+  const pool = candidates.length > 0 ? candidates : ITEM_DB;
 
   const lootItemIds = [];
   for (let i = 0; i < itemCount; i++) {
-    const powerLevel = Math.floor(rng() * (config.maxPowerLevel - config.minPowerLevel + 1)) + config.minPowerLevel;
-    const candidates = WEAK_LOOT_ITEMS.filter(it => it.powerLevel === powerLevel);
-    const template = pickRandom(rng, candidates.length > 0 ? candidates : WEAK_LOOT_ITEMS);
+    const template = pickRandom(rng, pool);
     const itemId = makeUUID(rng);
     state.entities[itemId] = {
       entityType: EntityType.Item,
@@ -70,6 +116,7 @@ export function spawnChest(config, EntityType, rng, state) {
       name: template.name,
       powerLevel: template.powerLevel,
       slot: template.slot,
+      material: template.material ?? null,
       location: zoneId,
     };
     state.items.push(itemId);

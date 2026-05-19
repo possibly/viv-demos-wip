@@ -21,6 +21,19 @@ export const CLASS_DATA = {
   shaman:   { icon: "⚡",  color: "#0070de" },
 };
 
+// Armor material restrictions per class. Weapons and jewelry (material: null) are unrestricted.
+export const CLASS_ARMOR_TYPES = {
+  warrior:  ["leather", "mail"],
+  paladin:  ["leather", "mail"],
+  hunter:   ["leather", "mail"],
+  rogue:    ["leather"],
+  priest:   ["cloth"],
+  mage:     ["cloth"],
+  warlock:  ["cloth"],
+  druid:    ["cloth", "leather"],
+  shaman:   ["leather", "mail"],
+};
+
 export const RACE_CLASS = {
   human:    ["warrior","paladin","rogue","priest","mage","warlock"],
   dwarf:    ["warrior","paladin","hunter","rogue","priest"],
@@ -37,12 +50,14 @@ export const RACE_LABELS = {
   orc: "Orc", revenant: "Revenant", minotaur: "Minotaur", troll: "Troll",
 };
 
+// levelMin/levelMax: recommended character level bracket for this zone.
+// powerMin/powerMax: item power range for loot that drops in (or is sold in) this zone.
 export const ZONES = [
-  { id: "hearthfield",  name: "Hearthfield",       desc: "A peaceful hillside settlement where new arrivals catch their first breath." },
-  { id: "millhaven",    name: "Millhaven",          desc: "A busy crossroads hamlet; the Wayward Lantern inn draws travelers from across the realm." },
-  { id: "briar_edge",   name: "The Briar's Edge",   desc: "The treeline thickens here; wolves and bandits lurk in the tangled undergrowth." },
-  { id: "stonewick",    name: "Stonewick Farm",      desc: "Rolling fields and weathered farmhouses, goats grazing in the amber light." },
-  { id: "stillwater",   name: "Stillwater Mere",    desc: "A glittering lake that mirrors the sky. Scouts watch from the reed banks." },
+  { id: "hearthfield",  name: "Hearthfield",       desc: "A peaceful hillside settlement where new arrivals catch their first breath.",  levelMin: 1, levelMax: 2, powerMin: 1, powerMax: 2 },
+  { id: "millhaven",    name: "Millhaven",          desc: "A busy crossroads hamlet; the Wayward Lantern inn draws travelers from across the realm.", levelMin: 1, levelMax: 2, powerMin: 1, powerMax: 2 },
+  { id: "briar_edge",   name: "The Briar's Edge",   desc: "The treeline thickens here; wolves and bandits lurk in the tangled undergrowth.",  levelMin: 1, levelMax: 3, powerMin: 1, powerMax: 2 },
+  { id: "stillwater",   name: "Stillwater Mere",    desc: "A glittering lake that mirrors the sky. Scouts watch from the reed banks.",         levelMin: 2, levelMax: 5, powerMin: 2, powerMax: 3 },
+  { id: "stonewick",    name: "Stonewick Farm",      desc: "Rolling fields and weathered farmhouses, goats grazing in the amber light.",        levelMin: 3, levelMax: 5, powerMin: 3, powerMax: 4 },
 ];
 
 export const ZONE_MAP = new Map(ZONES.map(z => [z.id, z]));
@@ -100,13 +115,19 @@ export const VENDOR_ARNAULT = {
   location: "hearthfield",
   discoveryRate: 1.0,
   items: [
-    { name: "Leather Gloves",  powerLevel: 1, slot: "hands", cost: 15 },
-    { name: "Leather Bracers", powerLevel: 1, slot: "wrist", cost: 15 },
-    { name: "Leather Belt",    powerLevel: 1, slot: "waist", cost: 15 },
+    { name: "Leather Gloves",  powerLevel: 1, slot: "hands", material: "leather", cost: 15 },
+    { name: "Leather Bracers", powerLevel: 1, slot: "wrist", material: "leather", cost: 15 },
+    { name: "Leather Belt",    powerLevel: 1, slot: "waist", material: "leather", cost: 15 },
+    { name: "Cloth Gloves",    powerLevel: 1, slot: "hands", material: "cloth",   cost: 15 },
+    { name: "Cloth Bracers",   powerLevel: 1, slot: "wrist", material: "cloth",   cost: 15 },
+    { name: "Cloth Sash",      powerLevel: 1, slot: "waist", material: "cloth",   cost: 15 },
+    { name: "Iron Gauntlets",  powerLevel: 1, slot: "hands", material: "mail",    cost: 15 },
+    { name: "Iron Vambraces",  powerLevel: 1, slot: "wrist", material: "mail",    cost: 15 },
+    { name: "Iron Girdle",     powerLevel: 1, slot: "waist", material: "mail",    cost: 15 },
   ],
 };
 
-// Faction quartermaster — sells power-3 gear gated by reputation tier.
+// Faction quartermaster — sells power-4 gear gated by reputation tier.
 export const QUARTERMASTER_RHYS = {
   id: "quartermasterRhys",
   name: "Quartermaster Rhys",
@@ -114,9 +135,14 @@ export const QUARTERMASTER_RHYS = {
   factionId: ZONE_FACTION.id,
   discoveryRate: 1.0,
   items: [
-    { name: "Sentinel's Iron Helm",     powerLevel: 3, slot: "head",      cost: 100, requiredRep: 70 },
-    { name: "Sentinel's Iron Pauldrons", powerLevel: 3, slot: "shoulders", cost: 150, requiredRep: 80 },
-    { name: "Sentinel's Iron Greaves",   powerLevel: 3, slot: "legs",      cost: 200, requiredRep: 90 },
+    { name: "Sentinel's Iron Helm",      powerLevel: 4, slot: "head",      material: "mail",    cost: 100, requiredRep: 70 },
+    { name: "Sentinel's Iron Pauldrons", powerLevel: 4, slot: "shoulders", material: "mail",    cost: 150, requiredRep: 80 },
+    { name: "Sentinel's Iron Greaves",   powerLevel: 4, slot: "legs",      material: "mail",    cost: 200, requiredRep: 90 },
+    { name: "Sentinel's Leather Helm",   powerLevel: 4, slot: "head",      material: "leather", cost: 100, requiredRep: 70 },
+    { name: "Sentinel's Leather Spaulders", powerLevel: 4, slot: "shoulders", material: "leather", cost: 150, requiredRep: 80 },
+    { name: "Sentinel's Leather Leggings",  powerLevel: 4, slot: "legs",   material: "leather", cost: 200, requiredRep: 90 },
+    { name: "Adept's Embroidered Mantle",   powerLevel: 4, slot: "shoulders", material: "cloth", cost: 150, requiredRep: 80 },
+    { name: "Adept's Spun Leggings",     powerLevel: 4, slot: "legs",      material: "cloth",   cost: 200, requiredRep: 90 },
   ],
 };
 
@@ -221,7 +247,7 @@ export const QUESTS = [
     targetZone: "stonewick",
     targetCount: 1,
     copperReward: ZONE_QUEST_COPPER_REWARD,
-    rewardItem: { name: "Farmer's Reinforced Tunic", powerLevel: 3, slot: "chest" },
+    rewardItem: { name: "Farmer's Reinforced Tunic", powerLevel: 4, slot: "chest", material: "leather" },
     description: "Plant the Spore-Crested Mushroom at Stonewick Farm and slay the Grimspawn Farmer that springs forth.",
   },
 ];
@@ -259,16 +285,9 @@ export const ZONE_DISCOVERABLES = Object.fromEntries(
 
 export const HOSTILE_ZONES = ["briar_edge", "stonewick", "stillwater"];
 
-// level 1-5 bracket maps to item power levels 2-3 (above starter gear, below endgame).
-export const LEVEL_RANGE_POWER = [
-  { minLevel: 1, maxLevel: 5, minPowerLevel: 2, maxPowerLevel: 3 },
-];
-
 export const CHEST_CONFIGS = [
   {
     name: "Worn Wooden Chest",
-    minLevel: 1, maxLevel: 5,
-    minPowerLevel: 2, maxPowerLevel: 3,
     minItems: 1, maxItems: 2,
     discoveryRate: 0.75,
     spawnChance: 0.25,
@@ -277,38 +296,189 @@ export const CHEST_CONFIGS = [
   },
 ];
 
-export const WEAK_LOOT_ITEMS = [
-  { name: "Tattered Cloth Hood",     powerLevel: 1, slot: "head" },
-  { name: "Worn Leather Gloves",     powerLevel: 1, slot: "hands" },
-  { name: "Rusty Iron Knife",        powerLevel: 1, slot: "mainhand" },
-  { name: "Crude Wooden Club",       powerLevel: 1, slot: "mainhand" },
-  { name: "Frayed Linen Bracers",    powerLevel: 1, slot: "wrist" },
-  { name: "Battered Iron Helm",      powerLevel: 2, slot: "head" },
-  { name: "Scratched Leather Boots", powerLevel: 2, slot: "feet" },
-  { name: "Chipped Short Sword",     powerLevel: 2, slot: "mainhand" },
-  { name: "Old Iron Mace",           powerLevel: 2, slot: "mainhand" },
-  { name: "Dented Iron Shield",      powerLevel: 2, slot: "offhand" },
-  { name: "Rough-spun Chain Coif",   powerLevel: 3, slot: "head" },
-  { name: "Scuffed Iron Pauldrons",  powerLevel: 3, slot: "shoulders" },
-  { name: "Notched Broadsword",      powerLevel: 3, slot: "mainhand" },
-  { name: "Crude Iron Axe",          powerLevel: 3, slot: "mainhand" },
-  { name: "Pitted Iron Gauntlets",   powerLevel: 3, slot: "hands" },
+// Loot pool definitions for enemy drops and chests, keyed by zone id.
+// Each pool is a query object understood by queryItems() in items.mjs.
+export const ZONE_LOOT_POOLS = {
+  briar_edge: { powerLevel: [1, 2] },
+  stillwater: { powerLevel: [2, 3] },
+  stonewick:  { powerLevel: [3, 4] },
+};
+
+// Named pools: shorthand aliases that expand to specific item ids.
+export const NAMED_POOLS = {
+  sentinel_mail:    ["mail_head_4", "mail_shoulders_4", "mail_chest_4", "mail_legs_4", "mail_feet_4"],
+  sentinel_leather: ["leather_head_4", "leather_shoulders_4", "leather_chest_4", "leather_legs_4", "leather_feet_4"],
+  adept_cloth:      ["cloth_head_4", "cloth_shoulders_4", "cloth_chest_4", "cloth_legs_4", "cloth_feet_4"],
+};
+
+// Global item database. Every lootable, chestable, or quest-rewardable piece of gear lives here.
+// material: "cloth" | "leather" | "mail" | null  (null = weapons / jewelry, no class restriction)
+export const ITEM_DB = [
+  // ── CLOTH power 1 ──
+  { id: "cloth_head_1",      name: "Frayed Linen Hood",           slot: "head",      material: "cloth",   powerLevel: 1 },
+  { id: "cloth_shoulders_1", name: "Tattered Cloth Mantle",       slot: "shoulders", material: "cloth",   powerLevel: 1 },
+  { id: "cloth_chest_1",     name: "Tattered Cloth Robe",         slot: "chest",     material: "cloth",   powerLevel: 1 },
+  { id: "cloth_wrist_1",     name: "Frayed Linen Bracers",        slot: "wrist",     material: "cloth",   powerLevel: 1 },
+  { id: "cloth_hands_1",     name: "Frayed Cloth Gloves",         slot: "hands",     material: "cloth",   powerLevel: 1 },
+  { id: "cloth_waist_1",     name: "Worn Cloth Sash",             slot: "waist",     material: "cloth",   powerLevel: 1 },
+  { id: "cloth_legs_1",      name: "Worn Linen Leggings",         slot: "legs",      material: "cloth",   powerLevel: 1 },
+  { id: "cloth_feet_1",      name: "Tattered Cloth Slippers",     slot: "feet",      material: "cloth",   powerLevel: 1 },
+  // ── CLOTH power 2 ──
+  { id: "cloth_head_2",      name: "Spun Linen Hood",             slot: "head",      material: "cloth",   powerLevel: 2 },
+  { id: "cloth_shoulders_2", name: "Scholar's Cloth Mantle",      slot: "shoulders", material: "cloth",   powerLevel: 2 },
+  { id: "cloth_chest_2",     name: "Scholar's Cloth Robe",        slot: "chest",     material: "cloth",   powerLevel: 2 },
+  { id: "cloth_wrist_2",     name: "Apprentice's Bracers",        slot: "wrist",     material: "cloth",   powerLevel: 2 },
+  { id: "cloth_hands_2",     name: "Linen Weave Gloves",          slot: "hands",     material: "cloth",   powerLevel: 2 },
+  { id: "cloth_waist_2",     name: "Linen Weave Sash",            slot: "waist",     material: "cloth",   powerLevel: 2 },
+  { id: "cloth_legs_2",      name: "Apprentice's Leggings",       slot: "legs",      material: "cloth",   powerLevel: 2 },
+  { id: "cloth_feet_2",      name: "Woven Cloth Shoes",           slot: "feet",      material: "cloth",   powerLevel: 2 },
+  // ── CLOTH power 3 ──
+  { id: "cloth_head_3",      name: "Sorcerer's Woven Hood",       slot: "head",      material: "cloth",   powerLevel: 3 },
+  { id: "cloth_shoulders_3", name: "Sorcerer's Mantle",           slot: "shoulders", material: "cloth",   powerLevel: 3 },
+  { id: "cloth_chest_3",     name: "Journeyman's Cloth Robe",     slot: "chest",     material: "cloth",   powerLevel: 3 },
+  { id: "cloth_wrist_3",     name: "Sorcerer's Bracers",          slot: "wrist",     material: "cloth",   powerLevel: 3 },
+  { id: "cloth_hands_3",     name: "Invoker's Cloth Gloves",      slot: "hands",     material: "cloth",   powerLevel: 3 },
+  { id: "cloth_waist_3",     name: "Invoker's Cloth Sash",        slot: "waist",     material: "cloth",   powerLevel: 3 },
+  { id: "cloth_legs_3",      name: "Sorcerer's Leggings",         slot: "legs",      material: "cloth",   powerLevel: 3 },
+  { id: "cloth_feet_3",      name: "Mystic's Cloth Slippers",     slot: "feet",      material: "cloth",   powerLevel: 3 },
+  // ── CLOTH power 4 ──
+  { id: "cloth_head_4",      name: "Adept's Woven Hood",          slot: "head",      material: "cloth",   powerLevel: 4 },
+  { id: "cloth_shoulders_4", name: "Adept's Embroidered Mantle",  slot: "shoulders", material: "cloth",   powerLevel: 4 },
+  { id: "cloth_chest_4",     name: "Adept's Embroidered Robe",    slot: "chest",     material: "cloth",   powerLevel: 4 },
+  { id: "cloth_wrist_4",     name: "Adept's Linen Bracers",       slot: "wrist",     material: "cloth",   powerLevel: 4 },
+  { id: "cloth_hands_4",     name: "Adept's Weave Gloves",        slot: "hands",     material: "cloth",   powerLevel: 4 },
+  { id: "cloth_waist_4",     name: "Adept's Cloth Girdle",        slot: "waist",     material: "cloth",   powerLevel: 4 },
+  { id: "cloth_legs_4",      name: "Adept's Spun Leggings",       slot: "legs",      material: "cloth",   powerLevel: 4 },
+  { id: "cloth_feet_4",      name: "Adept's Cloth Slippers",      slot: "feet",      material: "cloth",   powerLevel: 4 },
+
+  // ── LEATHER power 1 ──
+  { id: "leather_head_1",      name: "Worn Leather Cap",              slot: "head",      material: "leather", powerLevel: 1 },
+  { id: "leather_shoulders_1", name: "Tattered Leather Spaulders",    slot: "shoulders", material: "leather", powerLevel: 1 },
+  { id: "leather_chest_1",     name: "Battered Leather Vest",         slot: "chest",     material: "leather", powerLevel: 1 },
+  { id: "leather_wrist_1",     name: "Worn Leather Bracers",          slot: "wrist",     material: "leather", powerLevel: 1 },
+  { id: "leather_hands_1",     name: "Worn Leather Gloves",           slot: "hands",     material: "leather", powerLevel: 1 },
+  { id: "leather_waist_1",     name: "Cracked Leather Belt",          slot: "waist",     material: "leather", powerLevel: 1 },
+  { id: "leather_legs_1",      name: "Worn Leather Pants",            slot: "legs",      material: "leather", powerLevel: 1 },
+  { id: "leather_feet_1",      name: "Scuffed Leather Boots",         slot: "feet",      material: "leather", powerLevel: 1 },
+  // ── LEATHER power 2 ──
+  { id: "leather_head_2",      name: "Cured Leather Cap",             slot: "head",      material: "leather", powerLevel: 2 },
+  { id: "leather_shoulders_2", name: "Scout's Leather Spaulders",     slot: "shoulders", material: "leather", powerLevel: 2 },
+  { id: "leather_chest_2",     name: "Supple Leather Vest",           slot: "chest",     material: "leather", powerLevel: 2 },
+  { id: "leather_wrist_2",     name: "Cured Leather Bracers",         slot: "wrist",     material: "leather", powerLevel: 2 },
+  { id: "leather_hands_2",     name: "Tanned Leather Gloves",         slot: "hands",     material: "leather", powerLevel: 2 },
+  { id: "leather_waist_2",     name: "Cured Leather Belt",            slot: "waist",     material: "leather", powerLevel: 2 },
+  { id: "leather_legs_2",      name: "Cured Leather Pants",           slot: "legs",      material: "leather", powerLevel: 2 },
+  { id: "leather_feet_2",      name: "Trail Leather Boots",           slot: "feet",      material: "leather", powerLevel: 2 },
+  // ── LEATHER power 3 ──
+  { id: "leather_head_3",      name: "Tracker's Leather Cap",         slot: "head",      material: "leather", powerLevel: 3 },
+  { id: "leather_shoulders_3", name: "Tracker's Spaulders",           slot: "shoulders", material: "leather", powerLevel: 3 },
+  { id: "leather_chest_3",     name: "Ranger's Leather Vest",         slot: "chest",     material: "leather", powerLevel: 3 },
+  { id: "leather_wrist_3",     name: "Scout's Leather Bracers",       slot: "wrist",     material: "leather", powerLevel: 3 },
+  { id: "leather_hands_3",     name: "Tracker's Leather Grips",       slot: "hands",     material: "leather", powerLevel: 3 },
+  { id: "leather_waist_3",     name: "Ranger's Leather Belt",         slot: "waist",     material: "leather", powerLevel: 3 },
+  { id: "leather_legs_3",      name: "Scout's Leather Pants",         slot: "legs",      material: "leather", powerLevel: 3 },
+  { id: "leather_feet_3",      name: "Ranger's Leather Boots",        slot: "feet",      material: "leather", powerLevel: 3 },
+  // ── LEATHER power 4 ──
+  { id: "leather_head_4",      name: "Sentinel's Leather Helm",       slot: "head",      material: "leather", powerLevel: 4 },
+  { id: "leather_shoulders_4", name: "Sentinel's Leather Spaulders",  slot: "shoulders", material: "leather", powerLevel: 4 },
+  { id: "leather_chest_4",     name: "Sentinel's Leather Vest",       slot: "chest",     material: "leather", powerLevel: 4 },
+  { id: "leather_wrist_4",     name: "Sentinel's Leather Bracers",    slot: "wrist",     material: "leather", powerLevel: 4 },
+  { id: "leather_hands_4",     name: "Sentinel's Leather Grips",      slot: "hands",     material: "leather", powerLevel: 4 },
+  { id: "leather_waist_4",     name: "Sentinel's Leather Belt",       slot: "waist",     material: "leather", powerLevel: 4 },
+  { id: "leather_legs_4",      name: "Sentinel's Leather Leggings",   slot: "legs",      material: "leather", powerLevel: 4 },
+  { id: "leather_feet_4",      name: "Sentinel's Leather Boots",      slot: "feet",      material: "leather", powerLevel: 4 },
+
+  // ── MAIL power 1 ──
+  { id: "mail_head_1",      name: "Battered Iron Coif",           slot: "head",      material: "mail",    powerLevel: 1 },
+  { id: "mail_shoulders_1", name: "Battered Iron Pauldrons",      slot: "shoulders", material: "mail",    powerLevel: 1 },
+  { id: "mail_chest_1",     name: "Rusty Iron Hauberk",           slot: "chest",     material: "mail",    powerLevel: 1 },
+  { id: "mail_wrist_1",     name: "Rusty Iron Vambraces",         slot: "wrist",     material: "mail",    powerLevel: 1 },
+  { id: "mail_hands_1",     name: "Pitted Iron Gauntlets",        slot: "hands",     material: "mail",    powerLevel: 1 },
+  { id: "mail_waist_1",     name: "Dented Iron Girdle",           slot: "waist",     material: "mail",    powerLevel: 1 },
+  { id: "mail_legs_1",      name: "Dented Iron Chausses",         slot: "legs",      material: "mail",    powerLevel: 1 },
+  { id: "mail_feet_1",      name: "Scuffed Iron Sabatons",        slot: "feet",      material: "mail",    powerLevel: 1 },
+  // ── MAIL power 2 ──
+  { id: "mail_head_2",      name: "Hammered Iron Coif",           slot: "head",      material: "mail",    powerLevel: 2 },
+  { id: "mail_shoulders_2", name: "Iron Scale Pauldrons",         slot: "shoulders", material: "mail",    powerLevel: 2 },
+  { id: "mail_chest_2",     name: "Chainmail Hauberk",            slot: "chest",     material: "mail",    powerLevel: 2 },
+  { id: "mail_wrist_2",     name: "Linked Iron Vambraces",        slot: "wrist",     material: "mail",    powerLevel: 2 },
+  { id: "mail_hands_2",     name: "Iron Scale Gauntlets",         slot: "hands",     material: "mail",    powerLevel: 2 },
+  { id: "mail_waist_2",     name: "Riveted Iron Girdle",          slot: "waist",     material: "mail",    powerLevel: 2 },
+  { id: "mail_legs_2",      name: "Linked Iron Chausses",         slot: "legs",      material: "mail",    powerLevel: 2 },
+  { id: "mail_feet_2",      name: "Studded Iron Sabatons",        slot: "feet",      material: "mail",    powerLevel: 2 },
+  // ── MAIL power 3 ──
+  { id: "mail_head_3",      name: "Rough-spun Chain Coif",        slot: "head",      material: "mail",    powerLevel: 3 },
+  { id: "mail_shoulders_3", name: "Scuffed Iron Pauldrons",       slot: "shoulders", material: "mail",    powerLevel: 3 },
+  { id: "mail_chest_3",     name: "Forged Ringmail Hauberk",      slot: "chest",     material: "mail",    powerLevel: 3 },
+  { id: "mail_wrist_3",     name: "Linked Steel Vambraces",       slot: "wrist",     material: "mail",    powerLevel: 3 },
+  { id: "mail_hands_3",     name: "Forged Steel Gauntlets",       slot: "hands",     material: "mail",    powerLevel: 3 },
+  { id: "mail_waist_3",     name: "Riveted Steel Girdle",         slot: "waist",     material: "mail",    powerLevel: 3 },
+  { id: "mail_legs_3",      name: "Linked Steel Chausses",        slot: "legs",      material: "mail",    powerLevel: 3 },
+  { id: "mail_feet_3",      name: "Forged Steel Sabatons",        slot: "feet",      material: "mail",    powerLevel: 3 },
+  // ── MAIL power 4 ──
+  { id: "mail_head_4",      name: "Sentinel's Iron Helm",         slot: "head",      material: "mail",    powerLevel: 4 },
+  { id: "mail_shoulders_4", name: "Sentinel's Iron Pauldrons",    slot: "shoulders", material: "mail",    powerLevel: 4 },
+  { id: "mail_chest_4",     name: "Sentinel's Ringmail Hauberk",  slot: "chest",     material: "mail",    powerLevel: 4 },
+  { id: "mail_wrist_4",     name: "Sentinel's Iron Vambraces",    slot: "wrist",     material: "mail",    powerLevel: 4 },
+  { id: "mail_hands_4",     name: "Sentinel's Iron Gauntlets",    slot: "hands",     material: "mail",    powerLevel: 4 },
+  { id: "mail_waist_4",     name: "Sentinel's Iron Girdle",       slot: "waist",     material: "mail",    powerLevel: 4 },
+  { id: "mail_legs_4",      name: "Sentinel's Iron Greaves",      slot: "legs",      material: "mail",    powerLevel: 4 },
+  { id: "mail_feet_4",      name: "Sentinel's Iron Sabatons",     slot: "feet",      material: "mail",    powerLevel: 4 },
+
+  // ── Weapons (material: null — no class restriction) ──
+  { id: "weapon_sword_1",   name: "Chipped Shortsword",           slot: "mainhand",  material: null,      powerLevel: 1 },
+  { id: "weapon_dagger_1",  name: "Rusty Dagger",                 slot: "mainhand",  material: null,      powerLevel: 1 },
+  { id: "weapon_mace_1",    name: "Crude Wooden Club",            slot: "mainhand",  material: null,      powerLevel: 1 },
+  { id: "weapon_staff_1",   name: "Gnarled Branch",               slot: "mainhand",  material: null,      powerLevel: 1 },
+  { id: "weapon_wand_1",    name: "Whittled Wand",                slot: "mainhand",  material: null,      powerLevel: 1 },
+  { id: "weapon_shield_1",  name: "Battered Wooden Shield",       slot: "offhand",   material: null,      powerLevel: 1 },
+  { id: "weapon_sword_2",   name: "Worn Iron Sword",              slot: "mainhand",  material: null,      powerLevel: 2 },
+  { id: "weapon_axe_2",     name: "Iron Hatchet",                 slot: "mainhand",  material: null,      powerLevel: 2 },
+  { id: "weapon_mace_2",    name: "Iron-capped Mace",             slot: "mainhand",  material: null,      powerLevel: 2 },
+  { id: "weapon_dagger_2",  name: "Honed Dagger",                 slot: "mainhand",  material: null,      powerLevel: 2 },
+  { id: "weapon_shield_2",  name: "Dented Iron Shield",           slot: "offhand",   material: null,      powerLevel: 2 },
+  { id: "weapon_sword_3",   name: "Notched Broadsword",           slot: "mainhand",  material: null,      powerLevel: 3 },
+  { id: "weapon_axe_3",     name: "Crude Iron Axe",               slot: "mainhand",  material: null,      powerLevel: 3 },
+  { id: "weapon_mace_3",    name: "Bludgeoning Mace",             slot: "mainhand",  material: null,      powerLevel: 3 },
+  { id: "weapon_staff_3",   name: "Gnarled Ironwood Staff",       slot: "mainhand",  material: null,      powerLevel: 3 },
+  { id: "weapon_shield_3",  name: "Reinforced Iron Shield",       slot: "offhand",   material: null,      powerLevel: 3 },
+  { id: "weapon_sword_4",   name: "Well-Forged Longsword",        slot: "mainhand",  material: null,      powerLevel: 4 },
+  { id: "weapon_axe_4",     name: "Broad Iron Axe",               slot: "mainhand",  material: null,      powerLevel: 4 },
+  { id: "weapon_staff_4",   name: "Carved Hardwood Staff",        slot: "mainhand",  material: null,      powerLevel: 4 },
+  { id: "weapon_shield_4",  name: "Tempered Iron Shield",         slot: "offhand",   material: null,      powerLevel: 4 },
+
+  // ── Accessories (material: null — no class restriction) ──
+  { id: "acc_ring_1",       name: "Tarnished Copper Band",        slot: "ring1",     material: null,      powerLevel: 1 },
+  { id: "acc_ring_2",       name: "Copper Road Ring",             slot: "ring1",     material: null,      powerLevel: 2 },
+  { id: "acc_neck_2",       name: "Leather-cord Pendant",         slot: "neck",      material: null,      powerLevel: 2 },
+  { id: "acc_ring_3",       name: "Polished Silver Ring",         slot: "ring1",     material: null,      powerLevel: 3 },
+  { id: "acc_neck_3",       name: "Etched Bronze Talisman",       slot: "neck",      material: null,      powerLevel: 3 },
+  { id: "acc_ring_4",       name: "Engraved Iron Signet",         slot: "ring1",     material: null,      powerLevel: 4 },
 ];
 
 const _FRIENDLY_ZONE_IDS = ZONES.filter(z => !HOSTILE_ZONES.includes(z.id)).map(z => z.id);
 
 export const WANDERING_TRADER_ITEM_POOL = [
-  // power 3 (zone max)
-  { name: "Trail-Hardened Chain Coif",  powerLevel: 3, slot: "head",      cost: 80 },
-  { name: "Drifter's Iron Pauldrons",   powerLevel: 3, slot: "shoulders", cost: 80 },
-  { name: "Traveler's Ringmail Vest",   powerLevel: 3, slot: "chest",     cost: 80 },
-  { name: "Road-Worn Iron Greaves",     powerLevel: 3, slot: "legs",      cost: 80 },
-  { name: "Caravan Guard's Boots",      powerLevel: 3, slot: "feet",      cost: 80 },
-  // power 2 (zone max - 1)
-  { name: "Trader's Leather Bracers",   powerLevel: 2, slot: "wrist",     cost: 50 },
-  { name: "Dusty Leather Gloves",       powerLevel: 2, slot: "hands",     cost: 50 },
-  { name: "Patched Leather Belt",       powerLevel: 2, slot: "waist",     cost: 50 },
-  { name: "Copper Road Ring",           powerLevel: 2, slot: "ring1",     cost: 50 },
+  // power 3 — mail armor
+  { name: "Trail-Hardened Chain Coif",  powerLevel: 3, slot: "head",      material: "mail",    cost: 80 },
+  { name: "Drifter's Iron Pauldrons",   powerLevel: 3, slot: "shoulders", material: "mail",    cost: 80 },
+  { name: "Traveler's Ringmail Vest",   powerLevel: 3, slot: "chest",     material: "mail",    cost: 80 },
+  { name: "Road-Worn Iron Greaves",     powerLevel: 3, slot: "legs",      material: "mail",    cost: 80 },
+  { name: "Caravan Guard's Sabatons",   powerLevel: 3, slot: "feet",      material: "mail",    cost: 80 },
+  // power 3 — leather armor
+  { name: "Wanderer's Leather Hood",    powerLevel: 3, slot: "head",      material: "leather", cost: 80 },
+  { name: "Drifter's Leather Spaulders",powerLevel: 3, slot: "shoulders", material: "leather", cost: 80 },
+  { name: "Road-Worn Leather Vest",     powerLevel: 3, slot: "chest",     material: "leather", cost: 80 },
+  // power 3 — cloth armor
+  { name: "Wanderer's Cloth Hood",      powerLevel: 3, slot: "head",      material: "cloth",   cost: 80 },
+  { name: "Traveler's Embroidered Robe",powerLevel: 3, slot: "chest",     material: "cloth",   cost: 80 },
+  // power 2 — leather accessories
+  { name: "Trader's Leather Bracers",   powerLevel: 2, slot: "wrist",     material: "leather", cost: 50 },
+  { name: "Dusty Leather Gloves",       powerLevel: 2, slot: "hands",     material: "leather", cost: 50 },
+  { name: "Patched Leather Belt",       powerLevel: 2, slot: "waist",     material: "leather", cost: 50 },
+  // power 2 — jewelry (no material restriction)
+  { name: "Copper Road Ring",           powerLevel: 2, slot: "ring1",     material: null,      cost: 50 },
+  { name: "Leather-cord Pendant",       powerLevel: 2, slot: "neck",      material: null,      cost: 50 },
 ];
 
 export const WANDERING_TRADER_CONFIGS = [
