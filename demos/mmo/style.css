@@ -302,6 +302,9 @@ main { padding: 1.25rem; max-width: 700px; }
   color: #d4af37;
 }
 .zone-node.active .zone-npc { color: #f0c040; }
+.zone-wandering-trader { margin-top: 0.2rem; }
+.zone-trader { color: #e0a840 !important; }
+.zone-trader-stock { font-size: 0.68rem; color: var(--text-muted); margin-left: 0.3em; }
 
 /* Chronicle / events */
 .event-list {
@@ -323,6 +326,7 @@ main { padding: 1.25rem; max-width: 700px; }
 .event-entry.quest    { color: #d4af37; }
 .event-entry.loot     { color: #b89c5a; font-style: italic; }
 .event-entry.vendor   { color: #7eb8a8; }
+.event-entry.trader   { color: #e0a840; font-style: italic; }
 
 /* Modal */
 .modal {

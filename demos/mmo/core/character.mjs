@@ -39,6 +39,7 @@ export function generateCharacter(EntityType, rng, id, takenNames = new Set()) {
     partyMembers: [],
     partyLeaderId: null,
     partyQuestId: null,
+    knownTraderIds: [],
   };
 }
 

@@ -8,6 +8,7 @@ export {
   ENEMY_TEMPLATES, ZONE_ENEMIES, ZONE_DISCOVERABLES,
   HOSTILE_ZONES, LEVEL_RANGE_POWER, CHEST_CONFIGS, WEAK_LOOT_ITEMS,
   EQUIPMENT_SLOTS, SLOT_LABELS,
+  WANDERING_TRADER_CONFIGS,
 } from "./core/data.mjs";
 export { questXpReward, pickQuestForAdventurer } from "./core/quests.mjs";
 export { itemSellPrice, copperToString } from "./core/items.mjs";
@@ -21,6 +22,7 @@ import {
   QUEST_ITEMS, QUESTS,
   ENEMY_TEMPLATES, ZONE_DISCOVERABLES,
   CHEST_CONFIGS,
+  WANDERING_TRADER_CONFIGS,
 } from "./core/data.mjs";
 import { questXpReward, pickQuestForAdventurer, initialFactionRep } from "./core/quests.mjs";
 import { getAvgEquipmentPower, combatWinChance, generateLoot, formatLootSummary } from "./core/combat.mjs";
@@ -58,6 +60,26 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     state.zoneEnemyStacks[zoneId].push(id);
     return id;
   }
+
+  function shuffleArr(arr) {
+    const result = [...arr];
+    for (let i = result.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
+  }
+
+  state.traderStates = WANDERING_TRADER_CONFIGS.map(config => {
+    const friendlyZone = pickRandom(rng, config.friendlyZoneOptions);
+    const hostileZone  = pickRandom(rng, config.hostileZoneOptions);
+    state.entities[config.id] = {
+      entityType: EntityType.Character,
+      id: config.id, name: config.name, location: null, memories: {}, active: false,
+    };
+    state.characters.push(config.id);
+    return { config, active: false, cooldown: 0, friendlyZone, hostileZone, location: null, campTicks: 0, lifespanRemaining: 0, moveAtCampTick: null, hasMovedOnce: false, currentItems: [] };
+  });
 
   const adapter = {
     provisionActionID: () => makeUUID(rng),
@@ -374,6 +396,79 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     }
   }
 
+  // --- Wandering trader tick processing ---
+
+  async function departTrader(ts, events) {
+    const { config } = ts;
+    const departIds = await attempt("trader-depart", config.id, { trader: [config.id] }, true);
+    for (const id of departIds) {
+      const a = state.entities[id];
+      pushEvent(events, null, a.report ?? a.gloss ?? `${config.name} departs`, "trader");
+    }
+    ts.active = false;
+    ts.cooldown = config.cooldownTicks;
+    ts.currentItems = [];
+    state.entities[config.id].active = false;
+    state.entities[config.id].location = null;
+  }
+
+  async function processTraderTick(ts, events) {
+    const { config } = ts;
+
+    if (ts.cooldown > 0) { ts.cooldown--; return; }
+
+    if (!ts.active) {
+      if (rng() < config.spawnChance) {
+        const lifespan = Math.floor(rng() * (config.maxLifespan - config.minLifespan + 1)) + config.minLifespan;
+        ts.active = true;
+        ts.lifespanRemaining = lifespan;
+        ts.location = pickRandom(rng, [ts.friendlyZone, ts.hostileZone]);
+        ts.campTicks = 0;
+        ts.hasMovedOnce = false;
+        ts.moveAtCampTick = lifespan > config.minCampTicks * 2
+          ? Math.floor(rng() * (Math.min(15, lifespan - config.minCampTicks) - config.minCampTicks + 1)) + config.minCampTicks
+          : null;
+        ts.currentItems = shuffleArr(config.itemPool).slice(0, config.itemSellCount);
+        state.entities[config.id].location = ts.location;
+        state.entities[config.id].active = true;
+
+        const arrIds = await attempt("trader-arrive", config.id, { trader: [config.id], zone: [ts.location] }, true);
+        for (const id of arrIds) {
+          const a = state.entities[id];
+          pushEvent(events, null, a.report ?? a.gloss ?? `${config.name} arrives`, "trader");
+        }
+        const campIds = await attempt("trader-setup-camp", config.id, { trader: [config.id], zone: [ts.location] }, true);
+        for (const id of campIds) {
+          const a = state.entities[id];
+          pushEvent(events, null, a.report ?? a.gloss ?? `${config.name} sets up camp`, "trader");
+        }
+      }
+      return;
+    }
+
+    ts.lifespanRemaining--;
+    ts.campTicks++;
+
+    if (ts.lifespanRemaining <= 0) {
+      await departTrader(ts, events);
+      return;
+    }
+
+    if (!ts.hasMovedOnce && ts.moveAtCampTick !== null && ts.campTicks >= ts.moveAtCampTick) {
+      const otherZone = ts.location === ts.friendlyZone ? ts.hostileZone : ts.friendlyZone;
+      ts.location = otherZone;
+      ts.campTicks = 0;
+      ts.hasMovedOnce = true;
+      state.entities[config.id].location = otherZone;
+
+      const moveIds = await attempt("trader-move-camp", config.id, { trader: [config.id], zone: [otherZone] }, true);
+      for (const id of moveIds) {
+        const a = state.entities[id];
+        pushEvent(events, null, a.report ?? a.gloss ?? `${config.name} moves camp`, "trader");
+      }
+    }
+  }
+
   // --- Per-player tick processing ---
 
   // Phase 1: update flags, auto-accept quest, optionally fire party-request — same tick.
@@ -455,16 +550,33 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       }
     }
 
+    // Add active undiscovered wandering traders in this zone
+    for (const ts of state.traderStates) {
+      if (ts.active && ts.location === locationID && !(adventurer.knownTraderIds ?? []).includes(ts.config.id)) {
+        undiscoveredPool.push({ id: ts.config.id, discoveryRate: ts.config.discoveryRate, _traderState: ts });
+      }
+    }
+
     const discoveredVendorsHere = (VENDORS_BY_ZONE[locationID] ?? []).filter(v => discoveredHere.includes(v.id));
+
+    // Include active known wandering traders as virtual vendors
+    const allVendorsHere = [...discoveredVendorsHere];
+    for (const ts of state.traderStates) {
+      if (ts.active && ts.location === locationID &&
+          (adventurer.knownTraderIds ?? []).includes(ts.config.id) &&
+          ts.currentItems.length > 0) {
+        allVendorsHere.push({ id: ts.config.id, name: ts.config.name, items: ts.currentItems, _traderState: ts });
+      }
+    }
 
     adventurer.canFight = discoveredHere.some(id => id in ENEMY_TEMPLATES);
     adventurer.canScout = undiscoveredPool.length > 0;
 
     const sellableItems = (adventurer.inventory ?? []).filter(item => !item.isQuestItem);
-    adventurer.canSellItems = sellableItems.length > 0 && discoveredVendorsHere.length > 0;
+    adventurer.canSellItems = sellableItems.length > 0 && allVendorsHere.length > 0;
 
     const buyableCandidates = [];
-    for (const vendor of discoveredVendorsHere) {
+    for (const vendor of allVendorsHere) {
       for (const vi of vendor.items) {
         const currentPower = adventurer.equipment[vi.slot]?.powerLevel ?? 0;
         if (vi.powerLevel > currentPower && vi.cost <= (adventurer.copper ?? 0)) {
@@ -544,6 +656,12 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         const chosen = questTargetEntry ?? pickRandom(rng, undiscoveredPool);
 
         if (rng() < chosen.discoveryRate) {
+          if (chosen._traderState) {
+            // Wandering trader: remembered globally, not per-zone
+            if (!adventurer.knownTraderIds) adventurer.knownTraderIds = [];
+            adventurer.knownTraderIds.push(chosen.id);
+            pushEvent(events, adventurer.id, `${adventurer.name} spots ${chosen._traderState.config.name} making camp in ${zoneName}!`, "scouting");
+          } else {
           if (!adventurer.discoveredNPCs[locationID]) adventurer.discoveredNPCs[locationID] = [];
           adventurer.discoveredNPCs[locationID].push(chosen.id);
 
@@ -587,6 +705,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
               pushEvent(events, adventurer.id, `${adventurer.name} meets ${questGiver.name} in ${zoneName}!`, "scouting");
             }
           }
+          } // end trader else
         } else {
           pushEvent(events, adventurer.id, `${adventurer.name} searches ${zoneName} but finds nothing unusual.`, "scouting");
         }
@@ -611,7 +730,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     } else if (selectedActionName === "sell-items") {
       const toSell = (adventurer.inventory ?? []).filter(item => !item.isQuestItem);
       const sellValue = toSell.reduce((sum, item) => sum + itemSellPrice(item), 0);
-      const soldAt = discoveredVendorsHere[0];
+      const soldAt = allVendorsHere[0];
       newActionIDs.forEach(id => {
         const a = state.entities[id];
         pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "vendor");
@@ -664,6 +783,15 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
             }
           });
         });
+
+        if (boughtFrom._traderState) {
+          const ts = boughtFrom._traderState;
+          ts.currentItems = ts.currentItems.filter(it => it !== boughtItem);
+          if (ts.currentItems.length === 0) {
+            pushEvent(events, null, `${ts.config.name} has sold the last of their wares.`, "trader");
+            await departTrader(ts, events);
+          }
+        }
       }
 
     } else if (selectedActionName === "travel-to-quest-zone" || selectedActionName === "return-to-quest-giver") {
@@ -697,6 +825,10 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     }
 
     const events = [];
+    for (const ts of state.traderStates) {
+      await processTraderTick(ts, events);
+    }
+
     for (const pid of state.players) {
       await preActionUpdates(pid, events);
       await tickPlanner();
@@ -707,7 +839,16 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     const characters = Object.fromEntries(
       state.players.map(pid => [pid, structuredClone(state.entities[pid])])
     );
-    ticks.push({ index: t, timestamp: state.timestamp, events, characters });
+    const traders = state.traderStates.map(ts => ({
+      id: ts.config.id,
+      name: ts.config.name,
+      active: ts.active,
+      location: ts.location,
+      friendlyZone: ts.friendlyZone,
+      hostileZone: ts.hostileZone,
+      currentItems: ts.active ? [...ts.currentItems] : [],
+    }));
+    ticks.push({ index: t, timestamp: state.timestamp, events, characters, traders });
   }
 
   return { characters: initialChars, ticks, playerIds: state.players };

@@ -228,7 +228,7 @@ function renderModal(char) {
     </div>`;
 }
 
-function renderZonemap(charsByPid) {
+function renderZonemap(charsByPid, traders) {
   zonemapEl.innerHTML = "";
   // Merge all discoveries for the zonemap so the player can see everyone's progress.
   const mergedDiscoveries = {};
@@ -280,7 +280,12 @@ function renderZonemap(charsByPid) {
       ? `<div class="zone-present">${presentChars.map(c => `<span class="zone-char" style="color:${CLASS_DATA[c.class].color}">${CLASS_DATA[c.class].icon} ${c.name}</span>`).join("")}</div>`
       : "";
 
-    el.innerHTML = `<span class="zone-name">${z.name}</span><span class="zone-desc">${z.desc}</span>${presentHTML}${enemyHTML}${giverHTML}${vendorHTML}`;
+    const tradersHere = (traders ?? []).filter(t => t.active && t.location === z.id);
+    const traderHTML = tradersHere.length > 0
+      ? `<div class="zone-wandering-trader">${tradersHere.map(t => `<span class="zone-npc zone-trader">&#x1F9F3; ${t.name} <span class="zone-trader-stock">${t.currentItems.length} item${t.currentItems.length !== 1 ? "s" : ""}</span></span>`).join("")}</div>`
+      : "";
+
+    el.innerHTML = `<span class="zone-name">${z.name}</span><span class="zone-desc">${z.desc}</span>${presentHTML}${enemyHTML}${giverHTML}${vendorHTML}${traderHTML}`;
     zonemapEl.appendChild(el);
   }
 }
@@ -294,7 +299,7 @@ function render() {
   btnNext.disabled = currentTick === simData.ticks.length - 1;
 
   renderCharCards(tick.characters);
-  renderZonemap(tick.characters);
+  renderZonemap(tick.characters, tick.traders);
   if (!charModalEl.hidden && modalCharId && tick.characters[modalCharId]) {
     renderModal(tick.characters[modalCharId]);
   }

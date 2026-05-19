@@ -208,6 +208,39 @@ export const WEAK_LOOT_ITEMS = [
   { name: "Pitted Iron Gauntlets",   powerLevel: 3, slot: "hands" },
 ];
 
+const _FRIENDLY_ZONE_IDS = ZONES.filter(z => !HOSTILE_ZONES.includes(z.id)).map(z => z.id);
+
+export const WANDERING_TRADER_ITEM_POOL = [
+  // power 3 (zone max)
+  { name: "Trail-Hardened Chain Coif",  powerLevel: 3, slot: "head",      cost: 80 },
+  { name: "Drifter's Iron Pauldrons",   powerLevel: 3, slot: "shoulders", cost: 80 },
+  { name: "Traveler's Ringmail Vest",   powerLevel: 3, slot: "chest",     cost: 80 },
+  { name: "Road-Worn Iron Greaves",     powerLevel: 3, slot: "legs",      cost: 80 },
+  { name: "Caravan Guard's Boots",      powerLevel: 3, slot: "feet",      cost: 80 },
+  // power 2 (zone max - 1)
+  { name: "Trader's Leather Bracers",   powerLevel: 2, slot: "wrist",     cost: 50 },
+  { name: "Dusty Leather Gloves",       powerLevel: 2, slot: "hands",     cost: 50 },
+  { name: "Patched Leather Belt",       powerLevel: 2, slot: "waist",     cost: 50 },
+  { name: "Copper Road Ring",           powerLevel: 2, slot: "ring1",     cost: 50 },
+];
+
+export const WANDERING_TRADER_CONFIGS = [
+  {
+    id: "wanderingTrader",
+    name: "Theron the Wandering Trader",
+    discoveryRate: 0.80,
+    spawnChance: 0.02,
+    minLifespan: 20,
+    maxLifespan: 40,
+    cooldownTicks: 10,
+    minCampTicks: 5,
+    itemPool: WANDERING_TRADER_ITEM_POOL,
+    itemSellCount: 3,
+    friendlyZoneOptions: _FRIENDLY_ZONE_IDS,
+    hostileZoneOptions: [...HOSTILE_ZONES],
+  },
+];
+
 export const EQUIPMENT_SLOTS = [
   "head","neck","shoulders","chest","back","wrist","hands","waist","legs","feet",
   "ring1","ring2","trinket","mainhand","offhand","ranged","ammo",
