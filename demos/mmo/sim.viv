@@ -309,6 +309,29 @@ reserved action complete-quest:
                 urgent: true
         end
 
+// Fires the first time an adventurer encounters an NPC belonging to a faction they don't
+// yet know about. Resolves on the same tick as the encounter; the adapter records the new
+// faction in factionRelationships at neutral (for zone factions) or 0 (for enemy factions).
+reserved action discover-faction:
+    gloss: "@adventurer learns of a new faction"
+    roles:
+        @adventurer:
+            as: initiator
+        @source:
+            as: recipient
+            n: 0-1
+
+// Multi-step quest hook: when an adventurer carrying a quest item arrives at the planting
+// zone, this fires and the adapter spawns the linked enemy (and auto-discovers it for the
+// party in the zone).
+reserved action plant-quest-item:
+    gloss: "@adventurer plants the quest item at @zone"
+    roles:
+        @adventurer:
+            as: initiator
+        @zone:
+            as: location
+
 reserved action trader-arrive:
     gloss: "@trader arrives in @zone"
     roles:

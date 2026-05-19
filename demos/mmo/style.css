@@ -474,8 +474,11 @@ main { padding: 1.25rem; max-width: 700px; }
 }
 
 /* Faction standing */
+.standing-hated      { color: #d04040; }
 .standing-hostile    { color: #c07070; }
 .standing-unfriendly { color: #c08850; }
 .standing-neutral    { color: var(--text-muted); }
 .standing-friendly   { color: #6faa6f; }
 .standing-honored    { color: var(--mmo-gold); }
+.standing-revered    { color: #a880ff; }
+.standing-exalted    { color: #ff95d1; }

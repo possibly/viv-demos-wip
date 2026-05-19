@@ -52,14 +52,27 @@ export const LEVEL_CAP = 6;
 
 export const ENEMY_FACTION = { id: "grimspawn", name: "The Grimspawn", type: "enemy" };
 
+// Zone factions sit between players and the rest of the world. Players start neutral (50)
+// the moment they discover one, and earn rep by completing quests for that faction's NPCs.
+// Rep-per-quest is computed dynamically from the total number of quests in the zone (see
+// factionRepPerQuest in core/quests.mjs).
+export const ZONE_FACTION = {
+  id: "greenvale_alliance",
+  name: "Greenvale Alliance",
+  type: "zone",
+  zones: ["hearthfield", "millhaven", "briar_edge", "stonewick", "stillwater"],
+};
+
 export const FACTIONS = {
   [ENEMY_FACTION.id]: ENEMY_FACTION,
+  [ZONE_FACTION.id]: ZONE_FACTION,
 };
 
 export const QUEST_GIVER = {
   id: "questGiver",
   name: "Elder Mira",
   location: "millhaven",
+  factionId: ZONE_FACTION.id,
   discoveryRate: 1.0,
 };
 
@@ -67,10 +80,19 @@ export const RANGER_VOSS = {
   id: "rangerVoss",
   name: "Ranger Voss",
   location: "stonewick",
+  factionId: ZONE_FACTION.id,
   discoveryRate: 1.0,
 };
 
-export const ALL_QUEST_GIVERS = [QUEST_GIVER, RANGER_VOSS];
+export const HERBALIST_KASPAR = {
+  id: "herbalistKaspar",
+  name: "Herbalist Kaspar",
+  location: "hearthfield",
+  factionId: ZONE_FACTION.id,
+  discoveryRate: 1.0,
+};
+
+export const ALL_QUEST_GIVERS = [QUEST_GIVER, RANGER_VOSS, HERBALIST_KASPAR];
 
 export const VENDOR_ARNAULT = {
   id: "vendorArnault",
@@ -84,7 +106,21 @@ export const VENDOR_ARNAULT = {
   ],
 };
 
-export const ALL_VENDORS = [VENDOR_ARNAULT];
+// Faction quartermaster — sells power-3 gear gated by reputation tier.
+export const QUARTERMASTER_RHYS = {
+  id: "quartermasterRhys",
+  name: "Quartermaster Rhys",
+  location: "millhaven",
+  factionId: ZONE_FACTION.id,
+  discoveryRate: 1.0,
+  items: [
+    { name: "Sentinel's Iron Helm",     powerLevel: 3, slot: "head",      cost: 100, requiredRep: 70 },
+    { name: "Sentinel's Iron Pauldrons", powerLevel: 3, slot: "shoulders", cost: 150, requiredRep: 80 },
+    { name: "Sentinel's Iron Greaves",   powerLevel: 3, slot: "legs",      cost: 200, requiredRep: 90 },
+  ],
+};
+
+export const ALL_VENDORS = [VENDOR_ARNAULT, QUARTERMASTER_RHYS];
 
 // Pre-indexed by zone for O(1) lookup in the tick loop
 export const QUEST_GIVERS_BY_ZONE = {};
@@ -99,7 +135,16 @@ export const QUEST_ITEMS = {
     dropFrom: "grimspawn_captain",
     dropChance: 1.0,
   },
+  rare_mushroom: {
+    id: "rare_mushroom",
+    name: "Spore-Crested Mushroom",
+    dropFrom: "grimspawn_warrior",
+    dropChance: 0.25,
+  },
 };
+
+// Every quest given by a Zone Faction NPC awards 10c on completion (in addition to XP).
+const ZONE_QUEST_COPPER_REWARD = 10;
 
 export const QUESTS = [
   {
@@ -110,6 +155,7 @@ export const QUESTS = [
     targetTemplate: "grimspawn_scout",
     targetZone: "briar_edge",
     targetCount: 3,
+    copperReward: ZONE_QUEST_COPPER_REWARD,
     description: "Slay 3 Grimspawn Scouts in The Briar's Edge.",
   },
   {
@@ -120,6 +166,7 @@ export const QUESTS = [
     targetTemplate: "grimspawn_warrior",
     targetZone: "stillwater",
     targetCount: 2,
+    copperReward: ZONE_QUEST_COPPER_REWARD,
     description: "Defeat 2 Grimspawn Warriors at Stillwater Mere.",
   },
   {
@@ -130,6 +177,7 @@ export const QUESTS = [
     targetTemplate: "grimspawn_enforcer",
     targetZone: "stillwater",
     targetCount: 1,
+    copperReward: ZONE_QUEST_COPPER_REWARD,
     description: "Eliminate the Grimspawn Enforcer at Stillwater Mere.",
   },
   {
@@ -141,7 +189,40 @@ export const QUESTS = [
     targetZone: "stillwater",
     targetCount: 1,
     questItem: "captains_insignia",
+    copperReward: ZONE_QUEST_COPPER_REWARD,
     description: "Slay a Grimspawn Captain at Stillwater Mere and recover the Captain's Insignia.",
+  },
+  {
+    id: "spore_crested_mushroom",
+    name: "The Spore-Crested Mushroom",
+    level: 4,
+    questGiverId: "herbalistKaspar",
+    prerequisiteQuests: ["captains_seal"],
+    targetTemplate: "grimspawn_warrior",
+    targetZone: "briar_edge",
+    targetCount: 0,
+    questItem: "rare_mushroom",
+    copperReward: ZONE_QUEST_COPPER_REWARD,
+    description: "Recover a Spore-Crested Mushroom from a Grimspawn Warrior in The Briar's Edge (25% drop).",
+  },
+  {
+    id: "stonewick_planting",
+    name: "Seeds of Ruin",
+    level: 5,
+    questGiverId: "herbalistKaspar",
+    prerequisiteQuests: ["spore_crested_mushroom"],
+    prerequisiteFlags: ["boughtFromWanderingTrader"],
+    // Multi-step: arriving at the target zone plants the mushroom and spawns the farmer.
+    arrivalSpawn: {
+      zone: "stonewick",
+      spawnTemplate: "grimspawn_farmer",
+    },
+    targetTemplate: "grimspawn_farmer",
+    targetZone: "stonewick",
+    targetCount: 1,
+    copperReward: ZONE_QUEST_COPPER_REWARD,
+    rewardItem: { name: "Farmer's Reinforced Tunic", powerLevel: 3, slot: "chest" },
+    description: "Plant the Spore-Crested Mushroom at Stonewick Farm and slay the Grimspawn Farmer that springs forth.",
   },
 ];
 
@@ -151,19 +232,25 @@ export const ENEMY_TEMPLATES = {
   grimspawn_enforcer: { id: "grimspawn_enforcer", name: "Grimspawn Enforcer", faction: ENEMY_FACTION.id, type: "humanoid", level: 3, powerLevel: 1, xpReward: 200, discoveryRate: 1.0 },
   grimspawn_captain:  { id: "grimspawn_captain",  name: "Grimspawn Captain",  faction: ENEMY_FACTION.id, type: "humanoid", level: 4, powerLevel: 2, xpReward: 350, discoveryRate: 1.0 },
   grimspawn_warlord:  { id: "grimspawn_warlord",  name: "Grimspawn Warlord",  faction: ENEMY_FACTION.id, type: "humanoid", level: 5, powerLevel: 2, xpReward: 500, discoveryRate: 1.0 },
+  // Non-discoverable: only appears as a result of the Seeds of Ruin quest's planting step.
+  grimspawn_farmer:   { id: "grimspawn_farmer",   name: "Grimspawn Farmer",   faction: ENEMY_FACTION.id, type: "humanoid", level: 5, powerLevel: 2, xpReward: 600, discoveryRate: 1.0, discoverable: false },
 };
 
 export const ZONE_ENEMIES = {
   briar_edge: ["grimspawn_scout", "grimspawn_warrior"],
-  stonewick:  ["grimspawn_scout"],
+  stonewick:  ["grimspawn_scout", "grimspawn_farmer"],
   stillwater: ["grimspawn_warrior", "grimspawn_enforcer", "grimspawn_captain", "grimspawn_warlord"],
 };
 
+// Some enemy archetypes are associated with a zone but not surface-able via look-around;
+// they appear only through other gameplay (e.g. quest-triggered planting).
 export const ZONE_DISCOVERABLES = Object.fromEntries(
   ZONES.map(z => [
     z.id,
     [
-      ...(ZONE_ENEMIES[z.id] ?? []).map(id => ({ id, discoveryRate: ENEMY_TEMPLATES[id].discoveryRate })),
+      ...(ZONE_ENEMIES[z.id] ?? [])
+        .filter(id => ENEMY_TEMPLATES[id]?.discoverable !== false)
+        .map(id => ({ id, discoveryRate: ENEMY_TEMPLATES[id].discoveryRate })),
       ...ALL_QUEST_GIVERS.filter(qg => qg.location === z.id).map(qg => ({ id: qg.id, discoveryRate: qg.discoveryRate })),
       ...ALL_VENDORS.filter(v => v.location === z.id).map(v => ({ id: v.id, discoveryRate: v.discoveryRate })),
     ],
