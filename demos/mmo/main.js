@@ -1,5 +1,5 @@
 import { initializeVivRuntime, selectAction, attemptAction, tickPlanner, EntityType } from "../../shared/viv-runtime.js";
-import { runSim, CLASS_DATA, ZONES, ENEMY_TEMPLATES, ZONE_ENEMIES, LEVEL_XP_MIN, LEVEL_CAP, FACTIONS, RACE_LABELS, EQUIPMENT_SLOTS, SLOT_LABELS, QUEST_GIVER, ALL_QUEST_GIVERS, ALL_VENDORS, QUESTS, QUEST_ITEMS, copperToString, PLAYER_IDS } from "./sim.mjs";
+import { runSim, CLASS_DATA, ZONES, ENEMY_TEMPLATES, ZONE_ENEMIES, LEVEL_XP_MIN, LEVEL_CAP, FACTIONS, RACE_LABELS, EQUIPMENT_SLOTS, SLOT_LABELS, QUEST_GIVER, ALL_QUEST_GIVERS, ALL_VENDORS, QUESTS, QUEST_ITEMS, copperToString, PLAYER_IDS, factionRepPerQuest } from "./sim.mjs";
 
 const runtime = { initializeVivRuntime, selectAction, attemptAction, tickPlanner, EntityType };
 let cachedBundle = null;
@@ -29,11 +29,14 @@ const charModalEl = document.getElementById("char-modal");
 const modalBodyEl = document.getElementById("modal-body");
 
 function factionStanding(rep) {
-  if (rep <= 10)  return { label: "Hostile",    cls: "standing-hostile" };
-  if (rep <= 25)  return { label: "Unfriendly", cls: "standing-unfriendly" };
-  if (rep <= 60)  return { label: "Neutral",    cls: "standing-neutral" };
-  if (rep <= 80)  return { label: "Friendly",   cls: "standing-friendly" };
-  return            { label: "Honored",     cls: "standing-honored" };
+  if (rep < 10)  return { label: "Hated",      cls: "standing-hated" };
+  if (rep < 30)  return { label: "Hostile",    cls: "standing-hostile" };
+  if (rep < 50)  return { label: "Unfriendly", cls: "standing-unfriendly" };
+  if (rep < 60)  return { label: "Neutral",    cls: "standing-neutral" };
+  if (rep < 70)  return { label: "Friendly",   cls: "standing-friendly" };
+  if (rep < 80)  return { label: "Honored",    cls: "standing-honored" };
+  if (rep < 90)  return { label: "Revered",    cls: "standing-revered" };
+  return           { label: "Exalted",    cls: "standing-exalted" };
 }
 
 function questStatusText(char) {
@@ -159,6 +162,14 @@ function renderModal(char) {
   const completedQuestNames = (char.completedQuests ?? []).map(id => QUESTS.find(q => q.id === id)?.name ?? id);
 
   const qs = questStatusText(char);
+  const rewardParts = activeQuest ? [`${char.questXpReward ?? 0} XP`] : [];
+  if (activeQuest?.copperReward) rewardParts.push(copperToString(activeQuest.copperReward));
+  if (activeQuest?.rewardItem) rewardParts.push(`${activeQuest.rewardItem.name} (Pwr ${activeQuest.rewardItem.powerLevel})`);
+  if (activeQuest) {
+    const giver = ALL_QUEST_GIVERS.find(qg => qg.id === activeQuest.questGiverId);
+    const repGain = giver?.factionId ? factionRepPerQuest(giver.factionId) : 0;
+    if (repGain > 0) rewardParts.push(`+${repGain} ${FACTIONS[giver.factionId]?.name ?? giver.factionId} rep`);
+  }
   const questSectionHTML = (activeQuest || completedQuestNames.length > 0) ? `
     <div class="modal-section">
       <div class="modal-section-title">Quests</div>
@@ -166,7 +177,7 @@ function renderModal(char) {
         ${activeQuest ? `<tr><td class="col-label">Active</td><td>${activeQuest.name}</td></tr>
           <tr><td class="col-label col-muted">Goal</td><td class="col-muted">${activeQuest.description}</td></tr>
           <tr><td class="col-label col-muted">Progress</td><td class="col-muted">${qs?.phase ?? ""}</td></tr>
-          <tr><td class="col-label col-muted">Reward</td><td class="col-muted">${char.questXpReward ?? 0} XP</td></tr>` : ""}
+          <tr><td class="col-label col-muted">Reward</td><td class="col-muted">${rewardParts.join(" · ")}</td></tr>` : ""}
         ${completedQuestNames.length > 0 ? `<tr><td class="col-label">Completed</td><td>${completedQuestNames.join(", ")}</td></tr>` : ""}
       </tbody></table>
     </div>` : "";

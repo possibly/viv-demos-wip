@@ -1,4 +1,4 @@
-import { LEVEL_XP_MIN, LEVEL_CAP, RACE_CLASS, RACES, ZONES, QUEST_GIVER, RANGER_VOSS, ALL_VENDORS, WANDERING_TRADER_CONFIGS } from "./data.mjs";
+import { LEVEL_XP_MIN, LEVEL_CAP, RACE_CLASS, RACES, ZONES, ALL_QUEST_GIVERS, ALL_VENDORS, WANDERING_TRADER_CONFIGS } from "./data.mjs";
 import { pickRandom } from "./utils.mjs";
 import { getStarterEquipment } from "./items.mjs";
 
@@ -33,6 +33,7 @@ export function generateCharacter(EntityType, rng, id, takenNames = new Set()) {
     questEnemyFound: false,
     questHuntDone: false,
     questReadyToComplete: false,
+    questStepDone: false,
     pendingQuestEligible: false,
     partyId: null,
     partyActive: false,
@@ -40,6 +41,7 @@ export function generateCharacter(EntityType, rng, id, takenNames = new Set()) {
     partyLeaderId: null,
     partyQuestId: null,
     knownTraderIds: [],
+    boughtFromWanderingTrader: false,
   };
 }
 
@@ -61,20 +63,15 @@ export function buildInitialState(EntityType) {
     entities[character.id] = character;
     players.push(character.id);
   }
-  entities[QUEST_GIVER.id] = {
-    entityType: EntityType.Character,
-    id: QUEST_GIVER.id,
-    name: QUEST_GIVER.name,
-    location: QUEST_GIVER.location,
-    memories: {},
-  };
-  entities[RANGER_VOSS.id] = {
-    entityType: EntityType.Character,
-    id: RANGER_VOSS.id,
-    name: RANGER_VOSS.name,
-    location: RANGER_VOSS.location,
-    memories: {},
-  };
+  for (const qg of ALL_QUEST_GIVERS) {
+    entities[qg.id] = {
+      entityType: EntityType.Character,
+      id: qg.id,
+      name: qg.name,
+      location: qg.location,
+      memories: {},
+    };
+  }
   for (const vendor of ALL_VENDORS) {
     entities[vendor.id] = {
       entityType: EntityType.Character,
@@ -98,7 +95,7 @@ export function buildInitialState(EntityType) {
   return {
     timestamp: 0, entities,
     players,
-    characters: [...players, QUEST_GIVER.id, RANGER_VOSS.id, ...ALL_VENDORS.map(v => v.id), ...WANDERING_TRADER_CONFIGS.map(c => c.id), "world"],
+    characters: [...players, ...ALL_QUEST_GIVERS.map(qg => qg.id), ...ALL_VENDORS.map(v => v.id), ...WANDERING_TRADER_CONFIGS.map(c => c.id), "world"],
     locations,
     items: [], actions: [],
     vivInternalState: null,

@@ -1,16 +1,16 @@
 export {
   RACES, CLASS_DATA, RACE_CLASS, RACE_LABELS,
   ZONES, ZONE_MAP, LEVEL_XP_MIN, LEVEL_CAP,
-  ENEMY_FACTION, FACTIONS,
-  QUEST_GIVER, RANGER_VOSS, ALL_QUEST_GIVERS,
-  VENDOR_ARNAULT, ALL_VENDORS, QUEST_GIVERS_BY_ZONE, VENDORS_BY_ZONE,
+  ENEMY_FACTION, ZONE_FACTION, FACTIONS,
+  QUEST_GIVER, RANGER_VOSS, HERBALIST_KASPAR, ALL_QUEST_GIVERS,
+  VENDOR_ARNAULT, QUARTERMASTER_RHYS, ALL_VENDORS, QUEST_GIVERS_BY_ZONE, VENDORS_BY_ZONE,
   QUEST_ITEMS, QUESTS,
   ENEMY_TEMPLATES, ZONE_ENEMIES, ZONE_DISCOVERABLES,
   HOSTILE_ZONES, LEVEL_RANGE_POWER, CHEST_CONFIGS, WEAK_LOOT_ITEMS,
   EQUIPMENT_SLOTS, SLOT_LABELS,
   WANDERING_TRADER_CONFIGS,
 } from "./core/data.mjs";
-export { questXpReward, pickQuestForAdventurer } from "./core/quests.mjs";
+export { questXpReward, pickQuestForAdventurer, factionRepPerQuest, initialFactionRep } from "./core/quests.mjs";
 export { itemSellPrice, copperToString } from "./core/items.mjs";
 export { PLAYER_IDS } from "./core/character.mjs";
 
@@ -24,7 +24,7 @@ import {
   CHEST_CONFIGS,
   WANDERING_TRADER_CONFIGS,
 } from "./core/data.mjs";
-import { questXpReward, pickQuestForAdventurer, initialFactionRep } from "./core/quests.mjs";
+import { questXpReward, pickQuestForAdventurer, initialFactionRep, factionRepPerQuest } from "./core/quests.mjs";
 import { getAvgEquipmentPower, combatWinChance, generateLoot, formatLootSummary } from "./core/combat.mjs";
 import { itemSellPrice, copperToString, spawnChest } from "./core/items.mjs";
 import { getLevel, buildInitialState, PLAYER_IDS } from "./core/character.mjs";
@@ -163,6 +163,28 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     return (player.partyMembers ?? []).map(id => state.entities[id]).filter(Boolean);
   }
 
+  // Discovers a new faction for the adventurer if they don't yet know it, firing an
+  // urgent reserved discover-faction action on the same tick. Returns true if a new
+  // faction was discovered.
+  async function maybeDiscoverFaction(adventurer, factionId, sourceId, events) {
+    if (!factionId) return false;
+    if (factionId in adventurer.factionRelationships) return false;
+    const initialRep = initialFactionRep(factionId);
+    adventurer.factionRelationships[factionId] = initialRep;
+    // Only pass @source when it's an existing entity (e.g. quest giver, vendor). Enemy
+    // discoveries reference an archetype id, not a spawned entity, so we omit the role.
+    const bindings = { adventurer: [adventurer.id] };
+    if (sourceId && state.entities[sourceId]) bindings.source = [sourceId];
+    const discIds = await attempt("discover-faction", adventurer.id, bindings, true);
+    discIds.forEach(id => {
+      const a = state.entities[id];
+      pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "scouting");
+    });
+    const factionName = FACTIONS[factionId]?.name ?? factionId;
+    pushEvent(events, adventurer.id, `${adventurer.name} now knows of ${factionName} (rep: ${initialRep}).`, "scouting");
+    return true;
+  }
+
   function partyMembersInZone(player, zoneId) {
     return partyMembersOf(player).filter(m => m.location === zoneId);
   }
@@ -248,6 +270,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       m.questEnemyFound = (m.discoveredNPCs[quest.targetZone] ?? []).includes(quest.targetTemplate);
       m.questHuntDone = false;
       m.questReadyToComplete = false;
+      m.questStepDone = leader.questStepDone ?? false;
     }
   }
 
@@ -473,11 +496,40 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     const discoveredHere = adventurer.discoveredNPCs[locationID] ?? [];
 
     if (adventurer.questActive) {
+      const activeQuest = QUESTS.find(q => q.id === adventurer.questId);
+
+      // Multi-step: when the adventurer arrives at a quest's arrival-spawn zone with the
+      // planting step still open, fire plant-quest-item, spawn the linked enemy, and
+      // auto-discover it for the adventurer (and any party members on the same quest).
+      if (activeQuest?.arrivalSpawn && !adventurer.questStepDone && locationID === activeQuest.arrivalSpawn.zone) {
+        const arr = activeQuest.arrivalSpawn;
+        const plantIds = await attempt("plant-quest-item", adventurer.id, { adventurer: [adventurer.id], zone: [arr.zone] }, true);
+        plantIds.forEach(id => {
+          const a = state.entities[id];
+          pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "quest");
+        });
+
+        const newMobId = spawnEnemy(arr.spawnTemplate, arr.zone);
+        const mobName = ENEMY_TEMPLATES[arr.spawnTemplate]?.name ?? arr.spawnTemplate;
+        const zoneName = ZONE_MAP.get(arr.zone)?.name ?? arr.zone;
+
+        const witnesses = partyMembersOf(adventurer).filter(m => m.questActive && m.questId === adventurer.questId);
+        const recipients = witnesses.length > 0 ? witnesses : [adventurer];
+        for (const m of recipients) {
+          if (!m.discoveredNPCs[arr.zone]) m.discoveredNPCs[arr.zone] = [];
+          if (!m.discoveredNPCs[arr.zone].includes(arr.spawnTemplate)) {
+            m.discoveredNPCs[arr.zone].push(arr.spawnTemplate);
+          }
+          m.questStepDone = true;
+        }
+        pushEvent(events, adventurer.id, `A ${mobName} erupts from the soil at ${zoneName} — the party readies for combat!`, "scouting");
+      }
+
       adventurer.questEnemyFound = (adventurer.discoveredNPCs[adventurer.questTargetZone] ?? []).includes(adventurer.questTargetTemplate);
       const killsDone = (adventurer.questKillsDone ?? 0) >= (adventurer.questKillsNeeded ?? 1);
-      const activeQuest = QUESTS.find(q => q.id === adventurer.questId);
       const itemDone = !activeQuest?.questItem || adventurer.questItemCollected;
-      adventurer.questHuntDone = killsDone && itemDone;
+      const stepDone = !activeQuest?.arrivalSpawn || adventurer.questStepDone;
+      adventurer.questHuntDone = killsDone && itemDone && stepDone;
       adventurer.questReadyToComplete = adventurer.questHuntDone && locationID === adventurer.questGiverLocation && !adventurer.partyActive;
       if (adventurer.questReadyToComplete) {
         const newXp = Math.min(adventurer.xp + (adventurer.questXpReward ?? 0), xpCap);
@@ -517,6 +569,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         adventurer.questEnemyFound = (adventurer.discoveredNPCs[quest.targetZone] ?? []).includes(quest.targetTemplate);
         adventurer.questHuntDone = false;
         adventurer.questReadyToComplete = false;
+        adventurer.questStepDone = false;
         newAcceptIDs.forEach(id => {
           const a = state.entities[id];
           pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "quest");
@@ -572,7 +625,11 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
     const buyableCandidates = [];
     for (const vendor of allVendorsHere) {
+      const playerRep = vendor.factionId ? (adventurer.factionRelationships[vendor.factionId] ?? 0) : null;
       for (const vi of vendor.items) {
+        // Faction-gated stock: an item only appears in the candidate pool if the player
+        // has met its required rep with this vendor's faction.
+        if (vi.requiredRep && (playerRep === null || playerRep < vi.requiredRep)) continue;
         const currentPower = adventurer.equipment[vi.slot]?.powerLevel ?? 0;
         if (vi.powerLevel > currentPower && vi.cost <= (adventurer.copper ?? 0)) {
           buyableCandidates.push({ item: vi, vendor });
@@ -686,18 +743,17 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
             state.chestState.cooldownUntilTick = t + chestConfig.cooldownTicks;
 
           } else if (enemyTemplate) {
-            const factionId = enemyTemplate.faction;
-            const newFaction = !(factionId in adventurer.factionRelationships);
-            if (newFaction) adventurer.factionRelationships[factionId] = initialFactionRep(factionId);
-            const factionNote = newFaction ? ` ${FACTIONS[factionId]?.name ?? factionId} added to known factions.` : "";
-            pushEvent(events, adventurer.id, `${adventurer.name} spots a level ${enemyTemplate.level} ${enemyTemplate.name} in ${zoneName}.${factionNote}`, "scouting");
+            pushEvent(events, adventurer.id, `${adventurer.name} spots a level ${enemyTemplate.level} ${enemyTemplate.name} in ${zoneName}.`, "scouting");
+            await maybeDiscoverFaction(adventurer, enemyTemplate.faction, chosen.id, events);
           } else {
             const vendor = ALL_VENDORS.find(v => v.id === chosen.id);
             if (vendor) {
               pushEvent(events, adventurer.id, `${adventurer.name} encounters ${vendor.name} in ${zoneName}!`, "scouting");
+              await maybeDiscoverFaction(adventurer, vendor.factionId, chosen.id, events);
             } else {
               const questGiver = ALL_QUEST_GIVERS.find(qg => qg.id === chosen.id);
               pushEvent(events, adventurer.id, `${adventurer.name} meets ${questGiver.name} in ${zoneName}!`, "scouting");
+              await maybeDiscoverFaction(adventurer, questGiver.factionId, chosen.id, events);
             }
           }
           } // end trader else
@@ -712,9 +768,48 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "quest");
       });
       const activeGiver = ALL_QUEST_GIVERS.find(qg => qg.id === adventurer.questGiverId) ?? QUEST_GIVER;
+      const completedQuest = QUESTS.find(q => q.id === adventurer.questId);
       pushEvent(events, adventurer.id, `${adventurer.name} receives ${adventurer.questXpReward} XP from ${activeGiver.name}!`, "quest");
+
+      // Faction rep gain — the giver's faction (Zone Factions only, currently).
+      if (activeGiver?.factionId) {
+        const factionId = activeGiver.factionId;
+        const gain = factionRepPerQuest(factionId);
+        if (gain > 0) {
+          const oldRep = adventurer.factionRelationships[factionId] ?? initialFactionRep(factionId);
+          const newRep = Math.min(100, oldRep + gain);
+          adventurer.factionRelationships[factionId] = newRep;
+          pushEvent(events, adventurer.id, `${adventurer.name} gains ${gain} reputation with ${FACTIONS[factionId]?.name ?? factionId} (${oldRep} → ${newRep}).`, "quest");
+        }
+      }
+
+      // Copper reward (zone-faction quests award a flat amount in addition to XP).
+      if (completedQuest?.copperReward) {
+        adventurer.copper = (adventurer.copper ?? 0) + completedQuest.copperReward;
+        pushEvent(events, adventurer.id, `${adventurer.name} pockets ${copperToString(completedQuest.copperReward)} from ${activeGiver.name}.`, "quest");
+      }
+
+      // Optional fixed reward item (added to inventory; equipped if it's an upgrade).
+      if (completedQuest?.rewardItem) {
+        const rewardId = makeUUID(rng);
+        const item = {
+          entityType: EntityType.Item,
+          id: rewardId,
+          name: completedQuest.rewardItem.name,
+          powerLevel: completedQuest.rewardItem.powerLevel,
+          slot: completedQuest.rewardItem.slot,
+          location: locationID,
+        };
+        state.entities[rewardId] = item;
+        state.items.push(rewardId);
+        adventurer.inventory = [...(adventurer.inventory ?? []), item];
+        pushEvent(events, adventurer.id, `${adventurer.name} receives ${item.name} (Power ${item.powerLevel}).`, "loot");
+        await equipFromList(adventurer, [rewardId], events);
+      }
+
       adventurer.completedQuests = [...(adventurer.completedQuests ?? []), adventurer.questId];
       adventurer.questItemCollected = false;
+      adventurer.questStepDone = false;
 
       const levelUpNewIDs = await select({ initiatorID: adventurer.id, urgentOnly: true });
       levelUpNewIDs.forEach(id => {
@@ -781,6 +876,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
         if (boughtFrom._traderState) {
           const ts = boughtFrom._traderState;
+          adventurer.boughtFromWanderingTrader = true;
           ts.currentItems = ts.currentItems.filter(it => it !== boughtItem);
           if (ts.currentItems.length === 0) {
             pushEvent(events, null, `${ts.config.name} has sold the last of their wares.`, "trader");
