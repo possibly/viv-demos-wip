@@ -640,12 +640,6 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         adventurer.shouldEquipLoot = true;
         adventurer.pendingEquipSlot = boughtItem.slot;
 
-        newActionIDs.forEach(id => {
-          const a = state.entities[id];
-          pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "vendor");
-        });
-        pushEvent(events, adventurer.id, `${adventurer.name} buys ${boughtItem.name} from ${boughtFrom.name} for ${copperToString(boughtItem.cost)}.`, "vendor");
-
         const purchaseNewIDs = await attempt("purchase-item", adventurer.id, { adventurer: [adventurer.id], item: [boughtItemId], vendor: [boughtFrom.id] }, true);
         purchaseNewIDs.forEach(id => {
           const a = state.entities[id];
