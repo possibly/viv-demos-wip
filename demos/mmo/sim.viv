@@ -309,6 +309,36 @@ reserved action complete-quest:
                 urgent: true
         end
 
+reserved action trader-arrive:
+    gloss: "@trader arrives in @zone"
+    roles:
+        @trader:
+            as: initiator
+        @zone:
+            as: location, anywhere
+
+reserved action trader-setup-camp:
+    gloss: "@trader sets up camp in @zone"
+    roles:
+        @trader:
+            as: initiator
+        @zone:
+            as: location, anywhere
+
+reserved action trader-move-camp:
+    gloss: "@trader packs up and moves camp to @zone"
+    roles:
+        @trader:
+            as: initiator
+        @zone:
+            as: location, anywhere
+
+reserved action trader-depart:
+    gloss: "@trader packs up and leaves the area"
+    roles:
+        @trader:
+            as: initiator
+
 // While on an active quest the adventurer follows a strict priority order:
 // travel to the quest zone → scout for the enemy → fight → return to giver.
 // When no quest is active, or all quest actions are ineligible, normal free-roaming applies.
