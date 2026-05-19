@@ -2,10 +2,35 @@ import { ITEM_DB } from "./data.mjs";
 import { queryItems } from "./items.mjs";
 import { pickRandom } from "./utils.mjs";
 
+const SLOT_WEIGHTS = {
+  mainhand:  2.0,
+  offhand:   1.5,
+  chest:     1.5,
+  legs:      1.25,
+  head:      1.0,
+  shoulders: 1.0,
+  hands:     1.0,
+  feet:      1.0,
+  back:      0.75,
+  wrist:     0.75,
+  waist:     0.75,
+  ranged:    0.75,
+  ring1:     0.5,
+  ring2:     0.5,
+  neck:      0.5,
+  trinket:   0.5,
+  ammo:      0.25,
+};
+
 export function getAvgEquipmentPower(char) {
-  const items = Object.values(char.equipment).filter(item => item !== null);
-  if (items.length === 0) return 1;
-  return items.reduce((sum, item) => sum + item.powerLevel, 0) / items.length;
+  let weightedSum = 0, totalWeight = 0;
+  for (const [slot, item] of Object.entries(char.equipment)) {
+    if (item === null) continue;
+    const w = SLOT_WEIGHTS[slot] ?? 1.0;
+    weightedSum += item.powerLevel * w;
+    totalWeight += w;
+  }
+  return totalWeight === 0 ? 1 : weightedSum / totalWeight;
 }
 
 export function combatWinChance(playerLevel, avgEquipPower, enemyLevel, enemyPower) {
