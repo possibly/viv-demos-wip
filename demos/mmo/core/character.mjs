@@ -1,4 +1,4 @@
-import { LEVEL_XP_MIN, LEVEL_CAP, RACE_CLASS, RACES, ZONES, QUEST_GIVER, RANGER_VOSS, ALL_VENDORS } from "./data.mjs";
+import { LEVEL_XP_MIN, LEVEL_CAP, RACE_CLASS, RACES, ZONES, QUEST_GIVER, RANGER_VOSS, ALL_VENDORS, WANDERING_TRADER_CONFIGS } from "./data.mjs";
 import { pickRandom } from "./utils.mjs";
 import { getStarterEquipment } from "./items.mjs";
 
@@ -84,11 +84,21 @@ export function buildInitialState(EntityType) {
       memories: {},
     };
   }
+  for (const config of WANDERING_TRADER_CONFIGS) {
+    entities[config.id] = {
+      entityType: EntityType.Character,
+      id: config.id,
+      name: config.name,
+      location: null,
+      memories: {},
+      active: false,
+    };
+  }
   entities["world"] = { entityType: EntityType.Character, id: "world", name: "The World", memories: {} };
   return {
     timestamp: 0, entities,
     players,
-    characters: [...players, QUEST_GIVER.id, RANGER_VOSS.id, ...ALL_VENDORS.map(v => v.id), "world"],
+    characters: [...players, QUEST_GIVER.id, RANGER_VOSS.id, ...ALL_VENDORS.map(v => v.id), ...WANDERING_TRADER_CONFIGS.map(c => c.id), "world"],
     locations,
     items: [], actions: [],
     vivInternalState: null,

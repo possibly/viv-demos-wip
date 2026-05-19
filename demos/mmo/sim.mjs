@@ -73,11 +73,6 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
   state.traderStates = WANDERING_TRADER_CONFIGS.map(config => {
     const friendlyZone = pickRandom(rng, config.friendlyZoneOptions);
     const hostileZone  = pickRandom(rng, config.hostileZoneOptions);
-    state.entities[config.id] = {
-      entityType: EntityType.Character,
-      id: config.id, name: config.name, location: null, memories: {}, active: false,
-    };
-    state.characters.push(config.id);
     return { config, active: false, cooldown: 0, friendlyZone, hostileZone, location: null, campTicks: 0, lifespanRemaining: 0, moveAtCampTick: null, hasMovedOnce: false, currentItems: [] };
   });
 
