@@ -1,0 +1,395 @@
+// causal-actions — a hyper-Pynchonian gnarl in 200 ticks.
+//
+// Six characters drift between four locations (the post office, the tavern,
+// the bowling alley, the station platform) muttering, scrawling sigils,
+// passing postcards, and mailing parcels. The world's reactions deliberately
+// produce long causal chains that converge on the same climactic
+// confrontations — mistaken identities, flights from the station, accusations
+// rooted in something a stranger inscribed on a bathroom wall three ticks ago
+// and a postcard mailed twenty minutes before that.
+//
+// Three sifting patterns rake the chronicle for the convergence shapes:
+//   - the-trystero-arc: a sign-reading lineage AND a mail-conspiracy lineage
+//     must converge on the same paranoid climax.
+//   - mistaken-flight: a tight three-action chain via `triggered`.
+//   - gossip-cascade: a swarm of mutter/overhear actions feeding one climax.
+
+
+// ── Mundane background actions ───────────────────────────────────────────────
+
+action roll-strike:
+    gloss: "@bowler rolls a strike"
+    tags: mundane, bowling
+    roles:
+        @bowler:
+            as: initiator
+
+action order-drink:
+    gloss: "@drinker orders another drink"
+    tags: mundane, bar
+    roles:
+        @drinker:
+            as: initiator
+
+
+// ── Gossip lineage ───────────────────────────────────────────────────────────
+
+action mutter-aside:
+    gloss: "@speaker mutters something to @confidant"
+    tags: gossip
+    roles:
+        @speaker:
+            as: initiator
+        @confidant:
+            as: recipient
+    effects:
+        @confidant.paranoia += 5
+    reactions:
+        queue action overhear:
+            with:
+                @listener: @confidant
+                @source: @speaker
+            time:
+                between: 0 minutes and 3 minutes from action
+
+reserved action overhear:
+    gloss: "@listener overhears @source muttering"
+    tags: gossip, surveillance
+    roles:
+        @listener:
+            as: initiator
+        @source:
+            as: bystander
+    conditions:
+        @listener.paranoia >= 30
+    effects:
+        @listener.paranoia += 6
+    reactions:
+        // The listener mutters the rumour back to the source — the cascade.
+        queue action mutter-aside:
+            with:
+                @speaker: @listener
+                @confidant: @source
+            time:
+                between: 1 minutes and 3 minutes from action
+        // If paranoid enough, the listener confronts the source about it.
+        queue action confront:
+            with:
+                @accuser: @listener
+                @accused: @source
+            abandon:
+                @listener.paranoia < 55
+            time:
+                between: 0 minutes and 5 minutes from action
+
+
+// ── Mail / inscription lineage ───────────────────────────────────────────────
+
+action pass-postcard:
+    gloss: "@sender passes @card to @receiver"
+    tags: mail, conspiracy
+    roles:
+        @sender:
+            as: initiator
+        @receiver:
+            as: recipient
+        @card:
+            as: item
+    effects:
+        @card.mentions = @receiver
+        @card inscribe @this
+    reactions:
+        queue action inspect-postcard:
+            with:
+                @reader: @receiver
+                @card: @card
+            time:
+                between: 5 minutes and 20 minutes from action
+
+reserved action inspect-postcard:
+    gloss: "@reader peers at @card"
+    tags: mail, conspiracy
+    roles:
+        @reader:
+            as: initiator
+        @card:
+            as: item
+    effects:
+        @reader inspect @card
+    reactions:
+        queue action mistake-identity:
+            with partial:
+                @confuser: @reader
+                @assumed: @card.mentions
+            urgent: false
+            time:
+                between: 1 minutes and 4 minutes from action
+
+action mail-package:
+    gloss: "@sender mails @parcel to @target"
+    tags: mail, conspiracy
+    roles:
+        @sender:
+            as: initiator
+        @target:
+            as: recipient
+        @parcel:
+            as: item
+    effects:
+        @parcel.mentions = @target
+        @parcel inscribe @this
+    reactions:
+        queue plan delivery-of-import:
+            with:
+                @sender: @sender
+                @target: @target
+                @parcel: @parcel
+                @triggering: @this
+
+
+// ── Sign-reading lineage ─────────────────────────────────────────────────────
+
+action scrawl-on-wall:
+    gloss: "@scrawler scrawls a sigil onto @wall"
+    tags: conspiracy, sign
+    roles:
+        @scrawler:
+            as: initiator
+        @wall:
+            as: item
+    effects:
+        @wall inscribe @this
+    reactions:
+        queue action read-wall:
+            with:
+                @reader: @scrawler
+                @wall: @wall
+            time:
+                between: 0 minutes and 12 minutes from action
+
+reserved action read-wall:
+    gloss: "@reader squints at the sigils on @wall"
+    tags: conspiracy, sign
+    roles:
+        @reader:
+            as: initiator
+        @wall:
+            as: item
+    effects:
+        @reader inspect @wall
+        @reader.paranoia += 4
+    reactions:
+        queue action confront:
+            with partial:
+                @accuser: @reader
+            abandon:
+                @reader.paranoia < 40
+            time:
+                between: 0 minutes and 6 minutes from action
+
+
+// ── Paranoid climaxes ────────────────────────────────────────────────────────
+
+reserved action mistake-identity:
+    gloss: "@confuser takes @actual for @assumed"
+    tags: mistaken-identity, climactic
+    roles:
+        @confuser:
+            as: initiator
+        @actual:
+            as: recipient
+        @assumed:
+            as: bystander
+        @past-scrawl:
+            as: action, anywhere
+            from: ~recentScrawl()
+            n: 0-1
+    conditions:
+        @actual != @assumed
+        @confuser != @assumed
+    effects:
+        @confuser.target_id = @assumed
+        @confuser.paranoia += 6
+    reactions:
+        queue action confront:
+            with:
+                @accuser: @confuser
+                @accused: @assumed
+            priority: @confuser.paranoia
+
+reserved action confront:
+    gloss: "@accuser confronts @accused"
+    tags: confrontation, climactic
+    roles:
+        @accuser:
+            as: initiator
+        @accused:
+            as: recipient
+        @triggering:
+            as: action, anywhere
+            from: []
+            n: 0-1
+    effects:
+        @accuser.paranoia += 8
+        @accused.paranoia += 12
+    reactions:
+        queue action flee-station:
+            with:
+                @fleer: @accused
+            abandon:
+                @accused.paranoia < 60
+            time:
+                between: 0 minutes and 4 minutes from action
+
+reserved action flee-station:
+    gloss: "@fleer flees for the station platform"
+    tags: escape, climactic
+    roles:
+        @fleer:
+            as: initiator
+    effects:
+        @fleer.paranoia += 4
+
+
+// ── The plan: delivery-of-import ─────────────────────────────────────────────
+//
+// Queued by mail-package. Coordinates a rumor in the tavern, a third-party
+// interception of the parcel, and a final confrontation between sender and
+// target. The confrontation precasts the original mail-package action in the
+// @triggering role, producing a non-reaction-mediated causal edge (runtime
+// mechanism #1) — visible in the sifting-match diagram as a convergence that
+// doesn't pass through the normal reaction chain.
+
+plan delivery-of-import:
+    roles:
+        @sender:
+            as: character
+        @target:
+            as: character
+        @parcel:
+            as: item
+        @triggering:
+            as: action, anywhere
+            from: []
+    phases:
+        >rumor-phase:
+            queue action mutter-aside:
+                with:
+                    @speaker: @sender
+                    @confidant: @target
+        >interception-phase:
+            queue action inspect-postcard:
+                with:
+                    @reader: @target
+                    @card: @parcel
+        >confrontation-phase:
+            queue action confront:
+                with:
+                    @accuser: @sender
+                    @accused: @target
+                    @triggering: @triggering
+
+
+// ── Queries ──────────────────────────────────────────────────────────────────
+
+query gossipy:
+    action:
+        any: mutter-aside, overhear
+
+query mutters:
+    action:
+        any: mutter-aside
+
+query mail-sending:
+    action:
+        any: pass-postcard, mail-package
+
+query mail-reading:
+    action:
+        any: inspect-postcard
+
+query sign-scrawling:
+    action:
+        any: scrawl-on-wall
+
+query sign-reading:
+    action:
+        any: read-wall
+
+query paranoid-climaxes:
+    action:
+        any: mistake-identity, confront, flee-station
+
+query identity-mistakes:
+    action:
+        any: mistake-identity
+
+query confrontations:
+    action:
+        any: confront
+
+query flights:
+    action:
+        any: flee-station
+
+
+// ── Sifting patterns ─────────────────────────────────────────────────────────
+
+// The slow conspiracy: a wall-reading lineage and a mail-conspiracy lineage
+// both converge on the same paranoid climax. The diagram will show at least
+// one convergence indicator (─┼ ⋮ or [⋯id] ⋮).
+pattern the-trystero-arc:
+    actions:
+        @scrawl:
+            from: search query sign-scrawling:
+                over: inherit
+        @read:
+            from: search query sign-reading:
+                over: inherit
+        @send:
+            from: search query mail-sending:
+                over: inherit
+        @intercept:
+            from: search query mail-reading:
+                over: inherit
+        @climax:
+            from: search query paranoid-climaxes:
+                over: inherit
+    conditions:
+        @scrawl triggered @read
+        @send triggered @intercept
+        @intercept caused @climax
+        @read preceded @climax
+
+// The paranoid misfire: a tight three-node chain via `triggered`
+// (immediate parentage). The diagram will be compact and legible.
+pattern mistaken-flight:
+    actions:
+        @mistake:
+            from: search query identity-mistakes:
+                over: inherit
+        @confront:
+            from: search query confrontations:
+                over: inherit
+        @flee:
+            from: search query flights:
+                over: inherit
+    conditions:
+        @mistake triggered @confront
+        @confront triggered @flee
+
+// The cross-talk: many mutter/overhear actions feed into a single climax.
+// The diagram will be visually dense with arrows.
+pattern gossip-cascade:
+    actions:
+        @mutters*:
+            from: search query mutters:
+                over: inherit
+            n: 2-3
+        @climax:
+            from: search query confrontations:
+                over: inherit
+    conditions:
+        loop @mutters* as _@m:
+            _@m caused @climax
+        end

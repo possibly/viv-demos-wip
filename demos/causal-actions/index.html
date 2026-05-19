@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>causal-actions · viv</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=Courier+Prime:wght@400;700&family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="paper">
+
+    <header class="dossier-head">
+      <div class="head-inner">
+        <a class="back" href="../../">⟵  demos</a>
+        <h1>causal-actions</h1>
+        <p class="strap">a hyper-Pynchonian gnarl in 200 ticks</p>
+      </div>
+      <div class="stamp stamp-1">EYES ONLY</div>
+      <div class="stamp stamp-2">W·A·S·T·E·</div>
+      <div class="stamp stamp-3">5 NOV</div>
+    </header>
+
+    <section class="meta">
+      <p id="status" hidden></p>
+      <div class="controls">
+        <span id="seed-label" class="seed-label"></span>
+        <button id="btn-reseed">re-roll seed</button>
+        <button id="btn-replay">replay this seed</button>
+      </div>
+    </section>
+
+    <!-- ── 1. Source view ───────────────────────────────────────────────── -->
+    <section class="source-region">
+      <h2 class="section-h">Source — <code>world.viv</code></h2>
+      <p class="section-sub">The simulation grammar: twelve actions, four queries, three sifting patterns, one plan.</p>
+      <div id="source-pane" class="source-pane"></div>
+    </section>
+
+    <!-- ── 2. Scrubber + chronicle ──────────────────────────────────────── -->
+    <section id="chronicle-region" class="chronicle-region">
+      <h2 class="section-h">Chronicle</h2>
+      <p class="section-sub">Two hundred ticks of post offices, taverns, postcards, sigils, and mistaken identities. Drag the scrubber, or use ← → / Home End.</p>
+
+      <div class="scrub-row">
+        <button id="btn-start" class="scrub-btn">⟸ start</button>
+        <input id="scrubber" type="range" min="0" max="199" value="0" step="1">
+        <button id="btn-end" class="scrub-btn">end ⟹</button>
+      </div>
+
+      <div class="scrub-info">
+        <span id="tick-label">tick 001 / 200</span>
+        <span id="tick-time">T=0</span>
+        <span id="total-actions">events accumulated: 0</span>
+      </div>
+
+      <div class="chronicle-grid">
+        <div class="events-pane">
+          <h3 class="pane-h">at this tick</h3>
+          <div id="events" class="events"></div>
+        </div>
+        <div class="chars-pane">
+          <h3 class="pane-h">cast of characters</h3>
+          <div id="chars" class="chars"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── 3. Diagrams ──────────────────────────────────────────────────── -->
+    <section id="diagrams-region" class="diagrams-region">
+      <h2 class="section-h">Sifting matches</h2>
+      <p class="section-sub">Three patterns are raked over the complete chronicle. Click <code>[a1]</code> in any diagram or legend to jump the chronicle to that tick.</p>
+
+      <div id="diagram-trystero" class="diagram-block"></div>
+      <div id="diagram-flight" class="diagram-block"></div>
+      <div id="diagram-cascade" class="diagram-block"></div>
+    </section>
+
+    <footer class="dossier-foot">
+      <span>filed under: emergent narrative · viv runtime · 5 nov</span>
+    </footer>
+
+  </div>
+
+  <!-- Noise overlay -->
+  <svg class="noise-overlay" aria-hidden="true">
+    <filter id="noise">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/>
+      <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.5 0"/>
+    </filter>
+    <rect width="100%" height="100%" filter="url(#noise)"/>
+  </svg>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
