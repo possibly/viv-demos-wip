@@ -7,6 +7,8 @@ Browser demos for the [Viv](https://github.com/siftystudio/viv) emergent-narrati
 - **01-hello-world** — three characters in a tavern who greet each other
 - **mmo** — the game, the players and their online communities
 - **promweek** - promweek remake focused on viv integration
+- **causal-actions** — Pynchonian gnarl with three sifting patterns over the chronicle
+- **rootwork** — garden game; plants run multi-phase life plans, you and nature both satisfy the conditions
 
 Open `index.html` to browse them, or view them on GitHub Pages.
 

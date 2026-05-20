@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rootwork · viv</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <a href="../../" class="back">← demos</a>
+    <h1>Rootwork</h1>
+    <p class="subtitle">A garden game. Plants run plans. Conditions don't care who satisfies them.</p>
+    <div class="scene-bar">
+      <span id="season-label" class="scene-label">Season · Day 0</span>
+      <span id="day-count" class="day-count"></span>
+    </div>
+  </header>
+
+  <main>
+    <p id="status" class="status" hidden></p>
+
+    <section class="intro" id="intro">
+      <p>You tend four plots. Plants are characters with multi-phase life plans. Each phase advances when soil/weather conditions are satisfied — and the conditions don't care whether <em>you</em> satisfied them, or the rain, or a companion plant, or a wandering bee.</p>
+      <p>Every action — yours and the world's — gets recorded in the chronicle. At season's end, the chronicle is sifted: did you stay close, or let nature do the work?</p>
+    </section>
+
+    <section class="plots-section">
+      <div class="section-head">The garden</div>
+      <div class="plots-grid" id="plots-grid"></div>
+    </section>
+
+    <section class="basket-section">
+      <div class="section-head">Seed basket</div>
+      <div class="basket" id="basket"></div>
+    </section>
+
+    <section class="action-panel">
+      <div class="action-head">
+        <span>Your turn</span>
+        <span class="hint" id="action-hint">Pick a plot or a seed, then choose an action.</span>
+      </div>
+      <div class="selection-bar" id="selection-bar"></div>
+      <div class="action-list" id="action-list"></div>
+    </section>
+
+    <section class="log-section">
+      <div class="section-head">Chronicle</div>
+      <div class="log" id="log"></div>
+    </section>
+
+    <div class="outcome" id="outcome" hidden></div>
+  </main>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
