@@ -8,8 +8,10 @@
 // On accept, the adventurer may put out a zone-wide request-party call (urgent reserved); other
 // eligible players in the zone get respond-to-party (urgent reserved). The first 4 accepters
 // join, forming a party of up to 5. share-quest urgent-fires for joiners without the quest.
-// While in a party, kill credit, quest items, XP (Classic split), money (even, min 1), and
-// loot rolls (attempt-loot triggers loot-roll for each member) are shared.
+// Party combat: when any member picks fight, ONE roll resolves the encounter using the group's
+// average level+gear plus a size bonus (+0.5/member beyond solo). Every party member in the zone
+// fires a fight action on the same tick so each character appears in the narrative. Kill credit,
+// quest items, XP (Classic split), money (even, min 1), and loot rolls are shared.
 // The party disbands when every member is hunt-done; each member then turns in alone.
 
 reserved action wander:
