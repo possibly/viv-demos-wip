@@ -26,7 +26,7 @@ import {
   ZONE_LOOT_POOLS, CLASS_ARMOR_TYPES,
 } from "./core/data.mjs";
 import { questXpReward, pickQuestForAdventurer, initialFactionRep, factionRepPerQuest } from "./core/quests.mjs";
-import { getAvgEquipmentPower, combatWinChance, generateLoot, formatLootSummary } from "./core/combat.mjs";
+import { getAvgEquipmentPower, combatWinChance, partyWinChance, generateLoot, formatLootSummary } from "./core/combat.mjs";
 import { itemSellPrice, copperToString, spawnChest, queryItems } from "./core/items.mjs";
 import { getLevel, buildInitialState, PLAYER_IDS } from "./core/character.mjs";
 import { mulberry32, hashSeed, makeUUID, pickRandom, setIn } from "./core/utils.mjs";
@@ -768,8 +768,23 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       const enemy = state.entities[enemyId];
 
       const avgPower = getAvgEquipmentPower(adventurer);
-      const winChance = combatWinChance(adventurer.level, avgPower, enemy.level, enemy.powerLevel);
+      // allFighters includes self; partyMembersInZone returns [self] when solo.
+      const allFighters = partyMembersInZone(adventurer, locationID);
+      const winChance = allFighters.length > 1
+        ? partyWinChance(allFighters, enemy)
+        : combatWinChance(adventurer.level, avgPower, enemy.level, enemy.powerLevel);
       const playerWins = rng() < winChance;
+
+      // Fire a fight action for each non-initiating party member so every
+      // character has a Viv narrative entry for this combat.
+      for (const m of allFighters) {
+        if (m.id === adventurer.id) continue;
+        const memberFightIds = await attempt("fight", m.id, { adventurer: [m.id] }, true);
+        memberFightIds.forEach(id => {
+          const a = state.entities[id];
+          pushEvent(events, m.id, a.report ?? a.gloss ?? "(action)", "combat");
+        });
+      }
 
       const combatBindings = { adventurer: [adventurer.id], enemy: [enemyId] };
 

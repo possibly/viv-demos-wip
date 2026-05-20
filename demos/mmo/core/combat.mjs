@@ -41,6 +41,24 @@ export function combatWinChance(playerLevel, avgEquipPower, enemyLevel, enemyPow
   return -0.000417 * x ** 4 + 0.01083 * x ** 3 - 0.12957 * x ** 2 + 0.619157 * x;
 }
 
+// Additive effective-level bonus by party size (index = size, 0-based padding at 0).
+const PARTY_COMBAT_BONUS = [0, 0, 0.5, 1.0, 1.5, 2.0];
+
+function partyCombatBonus(size) {
+  if (size <= 5) return PARTY_COMBAT_BONUS[size] ?? 0;
+  return Math.log2(size) * 2;
+}
+
+// One-roll win chance for a group fighting together.
+// members: array of character objects (including the initiating adventurer).
+export function partyWinChance(members, enemy) {
+  const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const avgLevel = avg(members.map(m => m.level ?? 1));
+  const avgEquip = avg(members.map(m => getAvgEquipmentPower(m)));
+  const sizeBonus = partyCombatBonus(members.length);
+  return combatWinChance(avgLevel + sizeBonus, avgEquip, enemy.level, enemy.powerLevel);
+}
+
 // lootPool: pool descriptor for queryItems (e.g. { powerLevel: [1, 2] }).
 //           Falls back to the full ITEM_DB if absent or empty.
 // allowedMaterials: string[] | null — restricts armor drops to the looter's class types.
