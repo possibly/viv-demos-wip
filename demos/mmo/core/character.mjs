@@ -42,6 +42,15 @@ export function generateCharacter(EntityType, rng, id, takenNames = new Set()) {
     partyQuestId: null,
     knownTraderIds: [],
     boughtFromWanderingTrader: false,
+    stunned: false,
+    hasActivePlan: false,
+    seekingBossParty: false,
+    bossPartyFormed: false,
+    bossPartyId: null,
+    bossPartyMembers: [],
+    bossPartyZoneReady: false,
+    planTargetZone: null,
+    worldBossKillCredited: false,
   };
 }
 

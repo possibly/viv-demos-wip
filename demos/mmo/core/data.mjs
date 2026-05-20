@@ -253,13 +253,15 @@ export const QUESTS = [
 ];
 
 export const ENEMY_TEMPLATES = {
-  grimspawn_scout:    { id: "grimspawn_scout",    name: "Grimspawn Scout",    faction: ENEMY_FACTION.id, type: "humanoid", level: 1, powerLevel: 1, xpReward: 50,  discoveryRate: 1.0 },
-  grimspawn_warrior:  { id: "grimspawn_warrior",  name: "Grimspawn Warrior",  faction: ENEMY_FACTION.id, type: "humanoid", level: 2, powerLevel: 1, xpReward: 100, discoveryRate: 1.0 },
-  grimspawn_enforcer: { id: "grimspawn_enforcer", name: "Grimspawn Enforcer", faction: ENEMY_FACTION.id, type: "humanoid", level: 3, powerLevel: 1, xpReward: 200, discoveryRate: 1.0 },
-  grimspawn_captain:  { id: "grimspawn_captain",  name: "Grimspawn Captain",  faction: ENEMY_FACTION.id, type: "humanoid", level: 4, powerLevel: 2, xpReward: 350, discoveryRate: 1.0 },
-  grimspawn_warlord:  { id: "grimspawn_warlord",  name: "Grimspawn Warlord",  faction: ENEMY_FACTION.id, type: "humanoid", level: 5, powerLevel: 2, xpReward: 500, discoveryRate: 1.0 },
+  grimspawn_scout:      { id: "grimspawn_scout",      name: "Grimspawn Scout",      faction: ENEMY_FACTION.id, type: "humanoid", level: 1, powerLevel: 1, xpReward: 50,   discoveryRate: 1.0 },
+  grimspawn_warrior:    { id: "grimspawn_warrior",    name: "Grimspawn Warrior",    faction: ENEMY_FACTION.id, type: "humanoid", level: 2, powerLevel: 1, xpReward: 100,  discoveryRate: 1.0 },
+  grimspawn_enforcer:   { id: "grimspawn_enforcer",   name: "Grimspawn Enforcer",   faction: ENEMY_FACTION.id, type: "humanoid", level: 3, powerLevel: 1, xpReward: 200,  discoveryRate: 1.0 },
+  grimspawn_captain:    { id: "grimspawn_captain",    name: "Grimspawn Captain",    faction: ENEMY_FACTION.id, type: "humanoid", level: 4, powerLevel: 2, xpReward: 350,  discoveryRate: 1.0 },
+  grimspawn_warlord:    { id: "grimspawn_warlord",    name: "Grimspawn Warlord",    faction: ENEMY_FACTION.id, type: "humanoid", level: 5, powerLevel: 2, xpReward: 500,  discoveryRate: 1.0 },
   // Non-discoverable: only appears as a result of the Seeds of Ruin quest's planting step.
-  grimspawn_farmer:   { id: "grimspawn_farmer",   name: "Grimspawn Farmer",   faction: ENEMY_FACTION.id, type: "humanoid", level: 5, powerLevel: 2, xpReward: 600, discoveryRate: 1.0, discoverable: false },
+  grimspawn_farmer:     { id: "grimspawn_farmer",     name: "Grimspawn Farmer",     faction: ENEMY_FACTION.id, type: "humanoid", level: 5, powerLevel: 2, xpReward: 600,  discoveryRate: 1.0, discoverable: false },
+  // World boss: roams hostile zones, Lv 7 (max zone enemy Lv 5 + 2), spawned as a full entity.
+  grimspawn_chieftain:  { id: "grimspawn_chieftain",  name: "Grimspawn Chieftain",  faction: ENEMY_FACTION.id, type: "humanoid", level: 7, powerLevel: 4, xpReward: 3000, discoveryRate: 0.8, discoverable: false },
 };
 
 export const ZONE_ENEMIES = {
@@ -454,6 +456,12 @@ export const ITEM_DB = [
   { id: "acc_ring_3",       name: "Polished Silver Ring",         slot: "ring1",     material: null,      powerLevel: 3 },
   { id: "acc_neck_3",       name: "Etched Bronze Talisman",       slot: "neck",      material: null,      powerLevel: 3 },
   { id: "acc_ring_4",       name: "Engraved Iron Signet",         slot: "ring1",     material: null,      powerLevel: 4 },
+
+  // ── World Boss drops (Grimspawn Chieftain only — bossOnly flag excludes them from zone loot pools) ──
+  { id: "chieftain_ruinblade",    name: "Chieftain's Ruinblade",   slot: "mainhand", material: null,      powerLevel: 4, bossOnly: true },
+  { id: "chieftain_helm_cloth",   name: "Chieftain's Ironveil",    slot: "head",     material: "cloth",   powerLevel: 4, bossOnly: true },
+  { id: "chieftain_helm_leather", name: "Chieftain's Scalpcrown",  slot: "head",     material: "leather", powerLevel: 4, bossOnly: true },
+  { id: "chieftain_helm_mail",    name: "Chieftain's Warbrow",     slot: "head",     material: "mail",    powerLevel: 4, bossOnly: true },
 ];
 
 const _FRIENDLY_ZONE_IDS = ZONES.filter(z => !HOSTILE_ZONES.includes(z.id)).map(z => z.id);
@@ -497,6 +505,8 @@ export const WANDERING_TRADER_CONFIGS = [
     hostileZoneOptions: [...HOSTILE_ZONES],
   },
 ];
+
+export const CHIEFTAIN_DROPS = ["chieftain_ruinblade", "chieftain_helm_cloth", "chieftain_helm_leather", "chieftain_helm_mail"];
 
 export const EQUIPMENT_SLOTS = [
   "head","neck","shoulders","chest","back","wrist","hands","waist","legs","feet",

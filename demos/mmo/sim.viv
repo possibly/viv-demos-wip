@@ -399,13 +399,171 @@ reserved action attempt-leave:
         @zone:
             as: location, anywhere
 
+// Fires when a stunned adventurer's turn is consumed. Clears the stun flag.
+reserved action lose-turn:
+    gloss: "@adventurer staggers, still stunned — they lose their turn"
+    roles:
+        @adventurer:
+            as: initiator
+    conditions:
+        @adventurer.stunned
+    effects:
+        @adventurer.stunned = false
+
+// Grimspawn Chieftain world boss actions
+reserved action chieftain-patrol:
+    gloss: "@chieftain shifts patrol to @zone"
+    roles:
+        @chieftain:
+            as: initiator
+        @zone:
+            as: location, anywhere
+
+reserved action boss-stun:
+    gloss: "@chieftain catches @adventurer off guard — they stagger and lose their footing"
+    roles:
+        @chieftain:
+            as: initiator
+        @adventurer:
+            as: recipient
+    effects:
+        @adventurer.stunned = true
+
+reserved action boss-repelled:
+    gloss: "@adventurer stands firm and drives back @chieftain"
+    roles:
+        @adventurer:
+            as: initiator
+        @chieftain:
+            as: recipient
+
+// Fires for a solo player stunned by the chieftain; reaction queues the avenge plan
+reserved action trigger-boss-revenge:
+    gloss: "@adventurer vows to avenge the Chieftain's attack"
+    roles:
+        @adventurer:
+            as: initiator
+        @chieftain:
+            as: character, anywhere
+    reactions:
+        queue plan avenge-boss-stun:
+            with:
+                @adventurer: @adventurer
+                @chieftain: @chieftain
+
+// Boss party formation — mirrors request-party / respond-to-party pattern
+reserved action seek-boss-party:
+    gloss: "@adventurer puts out a call for allies to hunt the Chieftain"
+    roles:
+        @adventurer:
+            as: initiator
+    conditions:
+        !@adventurer.bossPartyFormed
+        !@adventurer.seekingBossParty
+    effects:
+        @adventurer.hasActivePlan = true
+        @adventurer.seekingBossParty = true
+
+reserved action respond-to-boss-party:
+    gloss: "@adventurer answers @leader's call to hunt the Chieftain"
+    roles:
+        @adventurer:
+            as: initiator
+        @leader:
+            as: recipient
+
+// Fires for each joiner when they're added to a boss party; reaction queues their plan
+reserved action share-boss-plan:
+    gloss: "@sharer rallies @adventurer to the Chieftain hunt"
+    roles:
+        @adventurer:
+            as: initiator
+        @sharer:
+            as: recipient
+        @chieftain:
+            as: character, anywhere
+    reactions:
+        queue plan avenge-boss-stun:
+            with:
+                @adventurer: @adventurer
+                @chieftain: @chieftain
+
+// Travel toward plan target (boss zone); mirrors travel-to-quest-zone
+reserved action travel-to-plan-target:
+    gloss: "@adventurer heads toward @zone in pursuit of the Chieftain"
+    roles:
+        @adventurer:
+            as: initiator
+        @zone:
+            as: location, anywhere
+            is: @adventurer.planTargetZone?
+    conditions:
+        @adventurer.planTargetZone
+        @adventurer.location != @adventurer.planTargetZone
+    effects:
+        @adventurer.location = @zone
+
+// Multi-tick plan: solo-stunned player forms a kill party and hunts the Chieftain.
+// Phases: wait until quest-free → recruit party → wait for all in boss zone → hunt boss.
+plan avenge-boss-stun:
+    roles:
+        @adventurer:
+            as: character
+        @chieftain:
+            as: character
+    phases:
+        >wait-for-free:
+            wait:
+                timeout: 365 days
+                until:
+                    !@adventurer.questActive
+            advance;
+        >seek-party:
+            queue action seek-boss-party:
+                with:
+                    @adventurer: @adventurer
+            wait:
+                timeout: 3 hours
+                until:
+                    @adventurer.bossPartyFormed
+            advance;
+        >gather-in-zone:
+            wait:
+                timeout: 2 hours
+                until:
+                    @adventurer.bossPartyZoneReady
+            advance;
+        >hunt-boss:
+            wait:
+                timeout: 365 days
+                until:
+                    !@chieftain.alive
+            succeed;
+
+// Generic plan-pursuit selector — fires when a player has an active plan and no quest.
+// Slots between quest-directed and vendor-interaction so plan goals don't get crowded out.
+reserved action-selector plan-directed:
+    roles:
+        @adventurer:
+            as: initiator
+    conditions:
+        @adventurer.hasActivePlan
+        !@adventurer.questActive
+    target in order:
+        seek-boss-party;
+        travel-to-plan-target;
+        fight;
+
 // While on an active quest the adventurer follows a strict priority order:
 // travel to the quest zone → scout for the enemy → fight → return to giver.
 // When no quest is active, or all quest actions are ineligible, normal free-roaming applies.
 // Vendor interactions (sell then buy) are tried between quest duties and free-roaming.
+// lose-turn fires first to consume stunned turns before any other action is considered.
 action-selector pick-activity:
     target in order:
+        lose-turn;
         selector quest-directed;
+        selector plan-directed;
         selector vendor-interaction;
         selector free-roaming;
 

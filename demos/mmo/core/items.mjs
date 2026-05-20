@@ -37,6 +37,7 @@ export function queryItems(pool, allowedMaterials = null) {
     candidates = ITEM_DB.filter(it => ids.includes(it.id));
   } else {
     candidates = ITEM_DB.filter(it => {
+      if (it.bossOnly) return false;
       if (pool.slot && it.slot !== pool.slot) return false;
       if (pool.material && it.material !== pool.material) return false;
       if (pool.powerLevel !== undefined) {

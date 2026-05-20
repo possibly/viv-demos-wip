@@ -9,6 +9,7 @@ export {
   HOSTILE_ZONES, CHEST_CONFIGS, ITEM_DB, ZONE_LOOT_POOLS, NAMED_POOLS, CLASS_ARMOR_TYPES,
   EQUIPMENT_SLOTS, SLOT_LABELS,
   WANDERING_TRADER_CONFIGS,
+  CHIEFTAIN_DROPS,
 } from "./core/data.mjs";
 export { questXpReward, pickQuestForAdventurer, factionRepPerQuest, initialFactionRep } from "./core/quests.mjs";
 export { itemSellPrice, copperToString } from "./core/items.mjs";
@@ -24,6 +25,7 @@ import {
   HOSTILE_ZONES, CHEST_CONFIGS,
   WANDERING_TRADER_CONFIGS,
   ZONE_LOOT_POOLS, CLASS_ARMOR_TYPES,
+  ITEM_DB, CHIEFTAIN_DROPS,
 } from "./core/data.mjs";
 import { questXpReward, pickQuestForAdventurer, initialFactionRep, factionRepPerQuest } from "./core/quests.mjs";
 import { getAvgEquipmentPower, combatWinChance, partyWinChance, generateLoot, formatLootSummary } from "./core/combat.mjs";
@@ -71,11 +73,42 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     return result;
   }
 
+  function spawnChieftain(zoneId) {
+    const entityId = spawnEnemy("grimspawn_chieftain", zoneId);
+    state.entities[entityId].isWorldBoss = true;
+    wb.alive = true;
+    wb.entityId = entityId;
+    wb.currentZone = zoneId;
+    return entityId;
+  }
+
+  function moveChieftain(newZoneId) {
+    const oldZone = wb.currentZone;
+    if (state.zoneEnemyStacks[oldZone]) {
+      state.zoneEnemyStacks[oldZone] = state.zoneEnemyStacks[oldZone].filter(id => id !== wb.entityId);
+    }
+    if (!state.zoneEnemyStacks[newZoneId]) state.zoneEnemyStacks[newZoneId] = [];
+    state.zoneEnemyStacks[newZoneId].push(wb.entityId);
+    state.entities[wb.entityId].location = newZoneId;
+    wb.currentZone = newZoneId;
+  }
+
   state.traderStates = WANDERING_TRADER_CONFIGS.map(config => {
     const friendlyZone = pickRandom(rng, config.friendlyZoneOptions);
     const hostileZone  = pickRandom(rng, config.hostileZoneOptions);
     return { config, active: false, cooldown: 0, friendlyZone, hostileZone, location: null, campTicks: 0, lifespanRemaining: 0, moveAtCampTick: null, hasMovedOnce: false, currentItems: [] };
   });
+
+  // World boss state — the Grimspawn Chieftain roams hostile zones
+  const wb = {
+    alive: false,
+    entityId: null,
+    currentZone: null,
+    spawnAt: 30 + Math.floor(rng() * 31),   // first spawn: tick 30–60
+    cooldownUntil: 0,
+    moveAt: Infinity,
+    playerLastAttackedAt: {},               // playerId → tick of last attack (30-tick immunity)
+  };
 
   const adapter = {
     provisionActionID: () => makeUUID(rng),
@@ -600,6 +633,197 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     }
   }
 
+  // --- World boss tick processing ---
+
+  async function checkBossAttacks(t, events) {
+    if (!wb.alive) return;
+    const chieftain = state.entities[wb.entityId];
+    if (!chieftain?.alive) return;
+
+    for (const pid of state.players) {
+      const player = state.entities[pid];
+      if (player.location !== wb.currentZone) continue;
+
+      const lastAttacked = wb.playerLastAttackedAt[pid] ?? -Infinity;
+      if (t - lastAttacked < 30) continue;
+      if (rng() >= 0.02) continue;
+
+      wb.playerLastAttackedAt[pid] = t;
+
+      const targets = player.partyActive
+        ? partyMembersInZone(player, wb.currentZone)
+        : [player];
+
+      // Discover chieftain for each target who hasn't seen it yet
+      for (const target of targets) {
+        const discoveredHere = target.discoveredNPCs[wb.currentZone] ?? [];
+        if (!discoveredHere.includes(wb.entityId)) {
+          if (!target.discoveredNPCs[wb.currentZone]) target.discoveredNPCs[wb.currentZone] = [];
+          target.discoveredNPCs[wb.currentZone].push(wb.entityId);
+          await maybeDiscoverFaction(target, ENEMY_FACTION.id, null, events);
+          const discoverIds = await attempt("discover-npc", target.id,
+            { adventurer: [target.id], enemy: [wb.entityId], zone: [wb.currentZone] }, true);
+          discoverIds.forEach(id => {
+            pushEvent(events, target.id, state.entities[id].gloss ?? "(action)", "scouting");
+          });
+          const tpl = ENEMY_TEMPLATES["grimspawn_chieftain"];
+          pushEvent(events, target.id, `${target.name} is caught off-guard — the level ${tpl.level} ${tpl.name} looms before them!`, "combat");
+        }
+      }
+
+      const playerWinChance = targets.length > 1
+        ? partyWinChance(targets, chieftain)
+        : combatWinChance(targets[0].level ?? 1, getAvgEquipmentPower(targets[0]), chieftain.level, chieftain.powerLevel);
+      const bossWins = rng() >= playerWinChance;
+
+      if (bossWins) {
+        for (const target of targets) {
+          const stunIds = await attempt("boss-stun", wb.entityId,
+            { chieftain: [wb.entityId], adventurer: [target.id] }, true);
+          stunIds.forEach(id => {
+            pushEvent(events, target.id, state.entities[id].gloss ?? "(action)", "combat");
+          });
+        }
+        const zoneName = ZONE_MAP.get(wb.currentZone)?.name ?? wb.currentZone;
+        pushEvent(events, pid, `The Grimspawn Chieftain ambushes ${player.name}${player.partyActive ? "'s party" : ""} in ${zoneName}!`, "combat");
+
+        // Queue revenge plan only for solo players who don't already have one
+        if (!player.partyActive) {
+          for (const target of targets) {
+            if (!target.hasActivePlan) {
+              const revengeIds = await attempt("trigger-boss-revenge", target.id,
+                { adventurer: [target.id], chieftain: [wb.entityId] }, true);
+              revengeIds.forEach(id => {
+                pushEvent(events, target.id, state.entities[id].gloss ?? "(action)", "combat");
+              });
+            }
+          }
+        }
+      } else {
+        const repelIds = await attempt("boss-repelled", targets[0].id,
+          { adventurer: [targets[0].id], chieftain: [wb.entityId] }, true);
+        repelIds.forEach(id => {
+          pushEvent(events, targets[0].id, state.entities[id].gloss ?? "(action)", "combat");
+        });
+        pushEvent(events, pid, `${player.name}${player.partyActive ? "'s party" : ""} holds their ground against the Grimspawn Chieftain.`, "combat");
+      }
+    }
+  }
+
+  async function processChieftainTick(t, events) {
+    if (!wb.alive) {
+      if (t >= Math.max(wb.spawnAt, wb.cooldownUntil)) {
+        const zone = pickRandom(rng, HOSTILE_ZONES);
+        spawnChieftain(zone);
+        wb.moveAt = t + 3 + Math.floor(rng() * 10);
+        const zoneName = ZONE_MAP.get(zone)?.name ?? zone;
+        pushEvent(events, null, `A powerful aura descends — the Grimspawn Chieftain has arrived in ${zoneName}!`, "combat");
+      }
+      return;
+    }
+
+    const chieftain = state.entities[wb.entityId];
+    if (!chieftain?.alive) { wb.alive = false; return; }
+
+    if (t >= wb.moveAt) {
+      const otherZones = HOSTILE_ZONES.filter(z => z !== wb.currentZone);
+      const newZone = pickRandom(rng, otherZones);
+      moveChieftain(newZone);
+      wb.moveAt = t + 3 + Math.floor(rng() * 10);
+      const patrolIds = await attempt("chieftain-patrol", wb.entityId,
+        { chieftain: [wb.entityId], zone: [newZone] }, true);
+      patrolIds.forEach(id => {
+        pushEvent(events, null, state.entities[id].gloss ?? "(action)", "combat");
+      });
+    }
+
+    await checkBossAttacks(t, events);
+  }
+
+  async function tryFormBossParty(leader, events) {
+    const candidates = state.players
+      .map(pid => state.entities[pid])
+      .filter(p => p.id !== leader.id && !p.bossPartyFormed);
+
+    const bossPartyId = makeUUID(rng);
+    const joiners = [];
+
+    for (const candidate of candidates) {
+      if (joiners.length >= PARTY_MAX_SIZE - 1) break;
+      const respondIds = await attempt("respond-to-boss-party", candidate.id,
+        { adventurer: [candidate.id], leader: [leader.id] }, true);
+      const accept = rng() < PARTY_RESPOND_CHANCE;
+      respondIds.forEach(id => {
+        pushEvent(events, candidate.id,
+          `${candidate.name} ${accept ? "accepts" : "declines"} ${leader.name}'s call to hunt the Chieftain.`, "party");
+      });
+      if (accept) joiners.push(candidate);
+    }
+
+    const members = [leader, ...joiners];
+    const memberIds = members.map(m => m.id);
+
+    for (const m of members) {
+      m.bossPartyId = bossPartyId;
+      m.bossPartyFormed = true;
+      m.bossPartyMembers = memberIds;
+      m.bossPartyZoneReady = false;
+      m.hasActivePlan = true;
+      m.planTargetZone = wb.alive ? wb.currentZone : null;
+    }
+
+    pushEvent(events, leader.id,
+      `Boss hunt party assembled: ${members.map(m => m.name).join(", ")} (${members.length}/${PARTY_MAX_SIZE}).`, "party");
+
+    // Share the boss plan with joiners via urgent share-boss-plan (reaction queues avenge-boss-stun for them)
+    for (const joiner of joiners) {
+      const shareIds = await attempt("share-boss-plan", joiner.id,
+        { adventurer: [joiner.id], sharer: [leader.id], chieftain: [wb.entityId] }, true);
+      shareIds.forEach(id => {
+        const a = state.entities[id];
+        pushEvent(events, joiner.id, a.report ?? a.gloss ?? "(action)", "party");
+      });
+      await drainUrgent(joiner.id, async (newIds) => {
+        for (const id of newIds) {
+          const a = state.entities[id];
+          pushEvent(events, joiner.id, a.report ?? a.gloss ?? "(action)", "party");
+        }
+      });
+    }
+
+    if (joiners.length === 0) {
+      pushEvent(events, leader.id, `${leader.name}'s call finds no takers — vowing to challenge the Chieftain alone.`, "party");
+    }
+  }
+
+  function resolveChieftainKill(killer, t, events) {
+    wb.alive = false;
+    wb.cooldownUntil = t + 30;
+    wb.spawnAt = t + 30 + 30 + Math.floor(rng() * 31);
+
+    // Award kill credit to boss party members in the zone
+    const killingPartyMembers = killer.bossPartyFormed
+      ? (killer.bossPartyMembers ?? []).map(id => state.entities[id]).filter(m => m?.location === wb.currentZone)
+      : [killer];
+    for (const m of killingPartyMembers) m.worldBossKillCredited = true;
+
+    // Clear plan state for all players (plan will resolve naturally via !chieftain.alive)
+    for (const pid of state.players) {
+      const p = state.entities[pid];
+      if (p.hasActivePlan) {
+        p.hasActivePlan = false;
+        p.seekingBossParty = false;
+        p.bossPartyFormed = false;
+        p.bossPartyZoneReady = false;
+        p.bossPartyMembers = [];
+        p.bossPartyId = null;
+        p.planTargetZone = null;
+      }
+    }
+
+    pushEvent(events, killer.id, `The Grimspawn Chieftain has fallen! The threat is vanquished.`, "victory");
+  }
+
   // --- Per-player tick processing ---
 
   // Phase 1: update flags, auto-accept quest, optionally fire party-request — same tick.
@@ -694,6 +918,15 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         }
       }
     }
+
+    // Update boss plan flags each tick
+    if (adventurer.hasActivePlan && wb.alive) {
+      adventurer.planTargetZone = wb.currentZone;
+      if (adventurer.bossPartyFormed && adventurer.bossPartyMembers?.length > 0) {
+        const bossParty = (adventurer.bossPartyMembers ?? []).map(id => state.entities[id]).filter(Boolean);
+        adventurer.bossPartyZoneReady = bossParty.every(m => m.location === wb.currentZone);
+      }
+    }
   }
 
   async function processPlayerTick(playerId, t, events) {
@@ -718,6 +951,13 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       }
     }
 
+    // Add chieftain to undiscovered pool if alive, in zone, and not yet seen by this player
+    const chieftainDiscoveredHere = wb.alive && wb.currentZone === locationID && wb.entityId &&
+      discoveredHere.includes(wb.entityId);
+    if (wb.alive && wb.currentZone === locationID && wb.entityId && !chieftainDiscoveredHere) {
+      undiscoveredPool.push({ id: wb.entityId, discoveryRate: ENEMY_TEMPLATES.grimspawn_chieftain.discoveryRate, _isChieftain: true });
+    }
+
     const discoveredVendorsHere = (VENDORS_BY_ZONE[locationID] ?? []).filter(v => discoveredHere.includes(v.id));
 
     // Include active known wandering traders as virtual vendors
@@ -730,7 +970,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       }
     }
 
-    adventurer.canFight = discoveredHere.some(id => id in ENEMY_TEMPLATES);
+    adventurer.canFight = discoveredHere.some(id => id in ENEMY_TEMPLATES) || chieftainDiscoveredHere;
     adventurer.canScout = undiscoveredPool.length > 0;
 
     const sellableItems = (adventurer.inventory ?? []).filter(item => !item.isQuestItem);
@@ -757,19 +997,53 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     const newActionIDs = await select({ initiatorID: adventurer.id });
     const selectedActionName = newActionIDs.length > 0 ? state.entities[newActionIDs[0]].name : null;
 
-    if (selectedActionName === "fight") {
-      const enemiesDiscoveredHere = discoveredHere.filter(id => id in ENEMY_TEMPLATES);
-      const inHuntPhase = adventurer.questActive && (adventurer.questEnemyFound ?? false) && !(adventurer.questHuntDone ?? false);
-      const questTargetHere = inHuntPhase && locationID === adventurer.questTargetZone && enemiesDiscoveredHere.includes(adventurer.questTargetTemplate);
-      const templateId = questTargetHere ? adventurer.questTargetTemplate : pickRandom(rng, enemiesDiscoveredHere);
+    if (selectedActionName === "lose-turn") {
+      newActionIDs.forEach(id => {
+        const a = state.entities[id];
+        pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "combat");
+      });
+      // stunned = false effect applied by Viv; player's turn is consumed
 
-      let enemyId = firstAliveEnemyOfTemplate(locationID, templateId);
-      if (!enemyId) enemyId = spawnEnemy(templateId, locationID);
+    } else if (selectedActionName === "seek-boss-party") {
+      newActionIDs.forEach(id => {
+        const a = state.entities[id];
+        pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "party");
+      });
+      if (!adventurer.bossPartyFormed) {
+        await tryFormBossParty(adventurer, events);
+      }
+
+    } else if (selectedActionName === "travel-to-plan-target") {
+      newActionIDs.forEach(id => {
+        const a = state.entities[id];
+        pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "party");
+      });
+      if (locationID !== adventurer.location) {
+        await maybeAmbushOnCrossing(adventurer, locationID, adventurer.location, events);
+      }
+
+    } else if (selectedActionName === "fight") {
+      const enemiesDiscoveredHere = discoveredHere.filter(id => id in ENEMY_TEMPLATES);
+
+      // Boss party members in the boss zone target the chieftain first
+      let enemyId;
+      if (adventurer.hasActivePlan && chieftainDiscoveredHere && wb.alive) {
+        enemyId = wb.entityId;
+      } else {
+        const inHuntPhase = adventurer.questActive && (adventurer.questEnemyFound ?? false) && !(adventurer.questHuntDone ?? false);
+        const questTargetHere = inHuntPhase && locationID === adventurer.questTargetZone && enemiesDiscoveredHere.includes(adventurer.questTargetTemplate);
+        const templateId = questTargetHere ? adventurer.questTargetTemplate : pickRandom(rng, enemiesDiscoveredHere);
+        enemyId = firstAliveEnemyOfTemplate(locationID, templateId);
+        if (!enemyId) enemyId = spawnEnemy(templateId, locationID);
+      }
       const enemy = state.entities[enemyId];
+      const isBossFight = enemyId === wb.entityId;
 
       const avgPower = getAvgEquipmentPower(adventurer);
-      // allFighters includes self; partyMembersInZone returns [self] when solo.
-      const allFighters = partyMembersInZone(adventurer, locationID);
+      // For boss fight: use boss party; for regular: use quest party
+      const allFighters = isBossFight && adventurer.bossPartyFormed
+        ? (adventurer.bossPartyMembers ?? []).map(id => state.entities[id]).filter(m => m?.location === locationID)
+        : partyMembersInZone(adventurer, locationID);
       const winChance = allFighters.length > 1
         ? partyWinChance(allFighters, enemy)
         : combatWinChance(adventurer.level, avgPower, enemy.level, enemy.powerLevel);
@@ -791,27 +1065,40 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       if (playerWins) {
         applyXpAwardForKill(adventurer, enemy, events);
 
-        const zoneLootPool = ZONE_LOOT_POOLS[locationID];
-        const allowedMaterials = CLASS_ARMOR_TYPES[adventurer.class];
-        const loot = generateLoot(rng, enemy, zoneLootPool, allowedMaterials);
-        const lootItemEntities = loot.items.map(it => {
-          const entityId = makeUUID(rng);
-          state.entities[entityId] = {
-            entityType: EntityType.Item,
-            id: entityId,
-            name: it.name,
-            powerLevel: it.powerLevel,
-            slot: it.slot,
-            material: it.material ?? null,
-            location: locationID,
-          };
-          state.items.push(entityId);
-          return state.entities[entityId];
-        });
+        // Use specific boss drops for chieftain; otherwise generate from zone pool
+        let lootItemEntities;
+        if (isBossFight) {
+          const bossDropDefs = ITEM_DB.filter(i => CHIEFTAIN_DROPS.includes(i.id));
+          lootItemEntities = bossDropDefs.map(it => {
+            const entityId = makeUUID(rng);
+            state.entities[entityId] = { entityType: EntityType.Item, id: entityId, name: it.name, powerLevel: it.powerLevel, slot: it.slot, material: it.material ?? null, location: locationID };
+            state.items.push(entityId);
+            return state.entities[entityId];
+          });
+        } else {
+          const zoneLootPool = ZONE_LOOT_POOLS[locationID];
+          const allowedMaterials = CLASS_ARMOR_TYPES[adventurer.class];
+          const loot = generateLoot(rng, enemy, zoneLootPool, allowedMaterials);
+          lootItemEntities = loot.items.map(it => {
+            const entityId = makeUUID(rng);
+            state.entities[entityId] = {
+              entityType: EntityType.Item,
+              id: entityId,
+              name: it.name,
+              powerLevel: it.powerLevel,
+              slot: it.slot,
+              material: it.material ?? null,
+              location: locationID,
+            };
+            state.items.push(entityId);
+            return state.entities[entityId];
+          });
+          enemy.lootCopper = loot.copper;
+        }
         enemy.lootItems = lootItemEntities.map(e => e.id);
-        enemy.lootCopper = loot.copper;
-        enemy.lootSummary = formatLootSummary(lootItemEntities, loot.copper);
-        enemy.hasLoot = lootItemEntities.length > 0 || loot.copper > 0;
+        enemy.lootCopper = isBossFight ? 0 : (enemy.lootCopper ?? 0);
+        enemy.lootSummary = formatLootSummary(lootItemEntities, enemy.lootCopper ?? 0);
+        enemy.hasLoot = lootItemEntities.length > 0 || (enemy.lootCopper ?? 0) > 0;
 
         const killNewIDs = await attempt("kill", adventurer.id, combatBindings, true);
         killNewIDs.forEach(id => {
@@ -819,8 +1106,12 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
           pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "victory");
         });
 
-        applyKillSharedCredit(adventurer, enemy, events);
-        applyQuestItemDrop(adventurer, enemy, events);
+        if (isBossFight) {
+          resolveChieftainKill(adventurer, t, events);
+        } else {
+          applyKillSharedCredit(adventurer, enemy, events);
+          applyQuestItemDrop(adventurer, enemy, events);
+        }
 
         await drainUrgent(adventurer.id, async (newIds) => {
           for (const id of newIds) {
@@ -859,7 +1150,9 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
           adventurer.discoveredNPCs[locationID].push(chosen.id);
 
           const chosenEntity = state.entities[chosen.id];
-          const enemyTemplate = ENEMY_TEMPLATES[chosen.id];
+          // For the chieftain: chosen.id is the entity ID; look up template via templateId
+          const enemyTemplate = ENEMY_TEMPLATES[chosen.id] ??
+            (chosenEntity?.templateId ? ENEMY_TEMPLATES[chosenEntity.templateId] : null);
 
           if (chosenEntity?.isChest) {
             const chest = chosenEntity;
@@ -882,6 +1175,16 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
 
             state.chestState.activeChestId = null;
             state.chestState.cooldownUntilTick = t + chestConfig.cooldownTicks;
+
+          } else if (chosen._isChieftain && chosenEntity?.isWorldBoss) {
+            // Chieftain discovered via look-around (entity ID in discoveredNPCs)
+            pushEvent(events, adventurer.id, `${adventurer.name} spots the ${enemyTemplate.name} prowling ${zoneName}!`, "scouting");
+            await maybeDiscoverFaction(adventurer, enemyTemplate.faction, null, events);
+            const discoverIds = await attempt("discover-npc", adventurer.id,
+              { adventurer: [adventurer.id], enemy: [chosen.id], zone: [locationID] }, true);
+            discoverIds.forEach(id => {
+              pushEvent(events, adventurer.id, state.entities[id].gloss ?? "(action)", "scouting");
+            });
 
           } else if (enemyTemplate) {
             pushEvent(events, adventurer.id, `${adventurer.name} spots a level ${enemyTemplate.level} ${enemyTemplate.name} in ${zoneName}.`, "scouting");
@@ -1074,6 +1377,7 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     for (const ts of state.traderStates) {
       await processTraderTick(ts, events);
     }
+    await processChieftainTick(t, events);
 
     for (const pid of state.players) {
       await preActionUpdates(pid, events);
@@ -1094,7 +1398,13 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       hostileZone: ts.hostileZone,
       currentItems: ts.active ? [...ts.currentItems] : [],
     }));
-    ticks.push({ index: t, timestamp: state.timestamp, events, characters, traders });
+    const worldBoss = wb.alive && wb.entityId ? {
+      alive: true,
+      name: ENEMY_TEMPLATES.grimspawn_chieftain.name,
+      zone: wb.currentZone,
+      zoneName: ZONE_MAP.get(wb.currentZone)?.name ?? wb.currentZone,
+    } : { alive: false };
+    ticks.push({ index: t, timestamp: state.timestamp, events, characters, traders, worldBoss });
   }
 
   return { characters: initialChars, ticks, playerIds: state.players };
