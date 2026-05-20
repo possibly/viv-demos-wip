@@ -362,6 +362,41 @@ reserved action trader-depart:
         @trader:
             as: initiator
 
+// Fires the first time an ambushing enemy is encountered by an adventurer who had not yet
+// discovered it. Resolves on the same tick as the ambush; the adapter records the discovery.
+reserved action discover-npc:
+    gloss: "@adventurer is caught off-guard by @enemy in @zone"
+    roles:
+        @adventurer:
+            as: initiator
+        @enemy:
+            as: recipient
+        @zone:
+            as: location, anywhere
+
+// Fires when an adventurer crosses into a hostile subzone and a random enemy intercepts
+// them (25% chance). Chains to kill on a win or retreat on a loss.
+reserved action subzone-ambush:
+    gloss: "@enemy ambushes @adventurer at the border of @zone"
+    roles:
+        @adventurer:
+            as: initiator
+        @enemy:
+            as: recipient
+        @zone:
+            as: location, anywhere
+
+// Fires when an adventurer tries to leave a hostile subzone (25% chance an enemy intercepts).
+// Analogous to fight: the adapter picks the enemy and resolves combat, then chains to kill
+// (adventurer escapes with loot) or retreat (adventurer is forced back into the zone).
+reserved action attempt-leave:
+    gloss: "@adventurer tries to leave @zone"
+    roles:
+        @adventurer:
+            as: initiator
+        @zone:
+            as: location, anywhere
+
 // While on an active quest the adventurer follows a strict priority order:
 // travel to the quest zone → scout for the enemy → fight → return to giver.
 // When no quest is active, or all quest actions are ineligible, normal free-roaming applies.

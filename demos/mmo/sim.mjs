@@ -20,8 +20,8 @@ import {
   QUEST_GIVER, ALL_QUEST_GIVERS,
   ALL_VENDORS, QUEST_GIVERS_BY_ZONE, VENDORS_BY_ZONE,
   QUEST_ITEMS, QUESTS,
-  ENEMY_TEMPLATES, ZONE_DISCOVERABLES,
-  CHEST_CONFIGS,
+  ENEMY_TEMPLATES, ZONE_ENEMIES, ZONE_DISCOVERABLES,
+  HOSTILE_ZONES, CHEST_CONFIGS,
   WANDERING_TRADER_CONFIGS,
   ZONE_LOOT_POOLS, CLASS_ARMOR_TYPES,
 } from "./core/data.mjs";
@@ -188,6 +188,114 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
     const factionName = FACTIONS[factionId]?.name ?? factionId;
     pushEvent(events, adventurer.id, `${adventurer.name} now knows of ${factionName} (rep: ${initialRep}).`, "scouting");
     return true;
+  }
+
+  // On every crossing of a hostile-zone boundary, rolls a 25% ambush chance. Any enemy in
+  // the hostile zone may attack — including undiscovered ones. Returns true if the player
+  // was repelled (lost the fight and location was reverted to fromZoneId), false otherwise.
+  async function maybeAmbushOnCrossing(adventurer, fromZoneId, toZoneId, events) {
+    const enteringHostile = HOSTILE_ZONES.includes(toZoneId);
+    const leavingHostile  = HOSTILE_ZONES.includes(fromZoneId);
+    if (!enteringHostile && !leavingHostile) return false;
+    if (rng() >= 0.25) return false;
+
+    const hostileZone = enteringHostile ? toZoneId : fromZoneId;
+    const allEnemiesInZone = ZONE_ENEMIES[hostileZone] ?? [];
+    if (allEnemiesInZone.length === 0) return false;
+
+    const templateId = pickRandom(rng, allEnemiesInZone);
+    const template = ENEMY_TEMPLATES[templateId];
+
+    let enemyId = firstAliveEnemyOfTemplate(hostileZone, templateId);
+    if (!enemyId) enemyId = spawnEnemy(templateId, hostileZone);
+    const enemy = state.entities[enemyId];
+
+    // Viv role bindings require the enemy and adventurer to be co-located. When leaving a
+    // hostile zone the adventurer is already at the destination; temporarily move the enemy
+    // there so the action can fire, then restore the enemy's home zone on retreat.
+    enemy.location = adventurer.location;
+
+    const discoveredInZone = adventurer.discoveredNPCs[hostileZone] ?? [];
+    const wasUndiscovered  = !discoveredInZone.includes(templateId);
+    if (wasUndiscovered) {
+      if (!adventurer.discoveredNPCs[hostileZone]) adventurer.discoveredNPCs[hostileZone] = [];
+      adventurer.discoveredNPCs[hostileZone].push(templateId);
+      await maybeDiscoverFaction(adventurer, template.faction, null, events);
+      const discoverIds = await attempt("discover-npc", adventurer.id, { adventurer: [adventurer.id], enemy: [enemyId], zone: [hostileZone] }, true);
+      discoverIds.forEach(id => {
+        const a = state.entities[id];
+        pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "scouting");
+      });
+      const zoneName = ZONE_MAP.get(hostileZone)?.name ?? hostileZone;
+      pushEvent(events, adventurer.id, `${adventurer.name} is caught off-guard — a level ${template.level} ${template.name} emerges from ${zoneName}!`, "scouting");
+    }
+
+    // entering hostile (or hostile→hostile): enemy-initiated ambush carries the @enemy role.
+    // leaving hostile: player-initiated attempt-leave (like fight — no @enemy, adapter resolves).
+    const isLeaving = leavingHostile && !enteringHostile;
+    const triggerName = isLeaving ? "attempt-leave" : "subzone-ambush";
+    const triggerBindings = isLeaving
+      ? { adventurer: [adventurer.id], zone: [hostileZone] }
+      : { adventurer: [adventurer.id], enemy: [enemyId], zone: [hostileZone] };
+    const ambushIds = await attempt(triggerName, adventurer.id, triggerBindings, true);
+    ambushIds.forEach(id => {
+      const a = state.entities[id];
+      pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", isLeaving ? "" : "retreat");
+    });
+
+    const avgPower = getAvgEquipmentPower(adventurer);
+    const winChance = combatWinChance(adventurer.level, avgPower, enemy.level, enemy.powerLevel);
+    const playerWins = rng() < winChance;
+    const combatBindings = { adventurer: [adventurer.id], enemy: [enemyId] };
+
+    if (playerWins) {
+      applyXpAwardForKill(adventurer, enemy, events);
+      const zoneLootPool = ZONE_LOOT_POOLS[hostileZone];
+      const allowedMaterials = CLASS_ARMOR_TYPES[adventurer.class];
+      const loot = generateLoot(rng, enemy, zoneLootPool, allowedMaterials);
+      const lootItemEntities = loot.items.map(it => {
+        const entityId = makeUUID(rng);
+        state.entities[entityId] = {
+          entityType: EntityType.Item,
+          id: entityId, name: it.name, powerLevel: it.powerLevel,
+          slot: it.slot, material: it.material ?? null, location: hostileZone,
+        };
+        state.items.push(entityId);
+        return state.entities[entityId];
+      });
+      enemy.lootItems = lootItemEntities.map(e => e.id);
+      enemy.lootCopper = loot.copper;
+      enemy.lootSummary = formatLootSummary(lootItemEntities, loot.copper);
+      enemy.hasLoot = lootItemEntities.length > 0 || loot.copper > 0;
+
+      const killIds = await attempt("kill", adventurer.id, combatBindings, true);
+      killIds.forEach(id => {
+        const a = state.entities[id];
+        pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "victory");
+      });
+      applyKillSharedCredit(adventurer, enemy, events);
+      applyQuestItemDrop(adventurer, enemy, events);
+      await drainUrgent(adventurer.id, async (newIds) => {
+        for (const id of newIds) {
+          const a = state.entities[id];
+          if (a.name === "attempt-loot") {
+            await resolveAttemptLoot(adventurer, enemy, [id], events);
+          } else {
+            pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "victory");
+          }
+        }
+      });
+      return false;
+    } else {
+      const retreatIds = await attempt("retreat", adventurer.id, combatBindings, true);
+      retreatIds.forEach(id => {
+        const a = state.entities[id];
+        pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "retreat");
+      });
+      enemy.location = hostileZone;
+      state.entities[adventurer.id].location = fromZoneId;
+      return true;
+    }
   }
 
   function partyMembersInZone(player, zoneId) {
@@ -910,6 +1018,18 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
         const a = state.entities[id];
         pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "quest");
       });
+      if (locationID !== adventurer.location) {
+        await maybeAmbushOnCrossing(adventurer, locationID, adventurer.location, events);
+      }
+
+    } else if (selectedActionName === "wander") {
+      newActionIDs.forEach(id => {
+        const a = state.entities[id];
+        pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "");
+      });
+      if (locationID !== adventurer.location) {
+        await maybeAmbushOnCrossing(adventurer, locationID, adventurer.location, events);
+      }
 
     } else {
       newActionIDs.forEach(id => {
