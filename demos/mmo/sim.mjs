@@ -230,10 +230,17 @@ export async function runSim({ initializeVivRuntime, selectAction, attemptAction
       pushEvent(events, adventurer.id, `${adventurer.name} is caught off-guard — a level ${template.level} ${template.name} emerges from ${zoneName}!`, "scouting");
     }
 
-    const ambushIds = await attempt("subzone-ambush", adventurer.id, { adventurer: [adventurer.id], enemy: [enemyId], zone: [hostileZone] }, true);
+    // entering hostile (or hostile→hostile): enemy-initiated ambush carries the @enemy role.
+    // leaving hostile: player-initiated attempt-leave (like fight — no @enemy, adapter resolves).
+    const isLeaving = leavingHostile && !enteringHostile;
+    const triggerName = isLeaving ? "attempt-leave" : "subzone-ambush";
+    const triggerBindings = isLeaving
+      ? { adventurer: [adventurer.id], zone: [hostileZone] }
+      : { adventurer: [adventurer.id], enemy: [enemyId], zone: [hostileZone] };
+    const ambushIds = await attempt(triggerName, adventurer.id, triggerBindings, true);
     ambushIds.forEach(id => {
       const a = state.entities[id];
-      pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", "retreat");
+      pushEvent(events, adventurer.id, a.report ?? a.gloss ?? "(action)", isLeaving ? "" : "retreat");
     });
 
     const avgPower = getAvgEquipmentPower(adventurer);

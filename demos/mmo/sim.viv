@@ -374,9 +374,8 @@ reserved action discover-npc:
         @zone:
             as: location, anywhere
 
-// Fires when a random enemy attacks an adventurer crossing into or out of a hostile subzone
-// (25% chance per crossing). Chains to kill on a win (adventurer keeps the new location and
-// gets loot) or retreat on a loss (adventurer is pushed back to their origin zone).
+// Fires when an adventurer crosses into a hostile subzone and a random enemy intercepts
+// them (25% chance). Chains to kill on a win or retreat on a loss.
 reserved action subzone-ambush:
     gloss: "@enemy ambushes @adventurer at the border of @zone"
     roles:
@@ -384,6 +383,17 @@ reserved action subzone-ambush:
             as: initiator
         @enemy:
             as: recipient
+        @zone:
+            as: location, anywhere
+
+// Fires when an adventurer tries to leave a hostile subzone (25% chance an enemy intercepts).
+// Analogous to fight: the adapter picks the enemy and resolves combat, then chains to kill
+// (adventurer escapes with loot) or retreat (adventurer is forced back into the zone).
+reserved action attempt-leave:
+    gloss: "@adventurer tries to leave @zone"
+    roles:
+        @adventurer:
+            as: initiator
         @zone:
             as: location, anywhere
 
