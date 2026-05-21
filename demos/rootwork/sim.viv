@@ -1,0 +1,392 @@
+// Rootwork — a garden game powered by Viv.
+//
+// Plants are characters with multi-phase life plans. Each phase advances when
+// soil/weather conditions are satisfied — and those conditions are agnostic
+// about who satisfies them. The gardener's watering can, a rainstorm, a
+// companion plant's root chemistry, a pollinator's visit: all bump the same
+// plot properties. Different causal paths produce different chronicles, and
+// the chronicles get sifted at season's end to surface the gardener's style.
+
+
+// ── Player actions (host fires via attemptAction with precast bindings) ────
+
+reserved action water-plot:
+    gloss: "@gardener waters @plot"
+    tags: care, player, moisture
+    roles:
+        @gardener:
+            as: initiator
+        @plot:
+            as: location, anywhere, precast
+
+reserved action mulch-plot:
+    gloss: "@gardener spreads mulch on @plot"
+    tags: care, player, mulch
+    roles:
+        @gardener:
+            as: initiator
+        @plot:
+            as: location, anywhere, precast
+
+reserved action plant-seed:
+    gloss: "@gardener plants @seed in @plot"
+    tags: planting, player
+    roles:
+        @gardener:
+            as: initiator
+        @plot:
+            as: location, anywhere, precast
+        @seed:
+            as: item, anywhere, precast
+        @plant:
+            as: character, anywhere, precast
+    effects:
+        @gardener inspect @seed
+        @plant inspect @seed
+    reactions:
+        queue plan plant-life:
+            with:
+                @plant: @plant
+                @plot: @plot
+                @seed: @seed
+
+reserved action harvest-fruit:
+    gloss: "@gardener harvests fruit from @plant"
+    tags: harvest, player
+    roles:
+        @gardener:
+            as: initiator
+        @plant:
+            as: character, anywhere, precast
+    effects:
+        @plant.harvested = true
+
+reserved action weed-pests:
+    gloss: "@gardener clears pests from @plot"
+    tags: care, player
+    roles:
+        @gardener:
+            as: initiator
+        @plot:
+            as: location, anywhere, precast
+
+
+// ── Nature / NPC actions ────────────────────────────────────────────────────
+//
+// These mutate the same plot/plant properties as the player actions. The
+// chronicle records who did what; the sifting patterns later read the
+// causal lineage of each ripened fruit.
+
+reserved action rain-falls:
+    gloss: "Rain falls on @plot"
+    tags: weather, npc, moisture
+    roles:
+        @sky:
+            as: initiator
+        @plot:
+            as: location, anywhere, precast
+
+reserved action sun-warms:
+    gloss: "The sun warms @plot"
+    tags: weather, npc, warmth
+    roles:
+        @sky:
+            as: initiator
+        @plot:
+            as: location, anywhere, precast
+
+reserved action clover-fixes-nitrogen:
+    gloss: "@plant fixes nitrogen in @plot"
+    tags: nature, npc, companion, nitrogen
+    roles:
+        @plant:
+            as: initiator
+        @plot:
+            as: location, anywhere, precast
+    effects:
+        @plot.nitrogen += 12
+
+reserved action bee-visits:
+    gloss: "A bee visits @plant"
+    tags: nature, npc, pollination
+    roles:
+        @bee:
+            as: initiator
+        @plant:
+            as: character, anywhere, precast
+    effects:
+        @plant.pollinated = true
+
+// Bee carries pollen from @donor's flower to @recipient. The recipient's
+// destined seed gets inscribed with this action, so when it's planted next
+// season we know its other parent.
+reserved action cross-pollinate:
+    gloss: "A bee carries pollen from @donor to @recipient"
+    tags: nature, npc, pollination, cross
+    roles:
+        @bee:
+            as: initiator
+        @donor:
+            as: character, anywhere, precast
+        @recipient:
+            as: character, anywhere, precast
+        @seed:
+            as: item, anywhere, precast
+    effects:
+        @recipient.pollinated = true
+        @seed inscribe @this
+
+reserved action pest-nibbles:
+    gloss: "Pests nibble at @plant"
+    tags: pest, npc
+    roles:
+        @bug:
+            as: initiator
+        @plant:
+            as: character, anywhere, precast
+    effects:
+        @plant.vigor -= 1
+
+
+// ── Plant life-stage actions (reserved; queued by the plant-life plan) ─────
+
+reserved action germinate:
+    gloss: "@plant germinates in @plot"
+    tags: growth, stage
+    roles:
+        @plant:
+            as: initiator
+        @plot:
+            as: location, anywhere, precast
+        @ancestry:
+            as: action, anywhere
+            from: ~lastRipeningForPlant(@plant)
+            n: 0-1
+        @hybrid-origin:
+            as: action, anywhere
+            from: ~lastCrossForPlant(@plant)
+            n: 0-1
+    effects:
+        @plant.stage = "sprouting"
+
+reserved action leaf-out:
+    gloss: "@plant leafs out in @plot"
+    tags: growth, stage
+    roles:
+        @plant:
+            as: initiator
+        @plot:
+            as: location, anywhere, precast
+    effects:
+        @plant.stage = "vegetative"
+
+reserved action flower:
+    gloss: "@plant flowers in @plot"
+    tags: growth, stage
+    roles:
+        @plant:
+            as: initiator
+        @plot:
+            as: location, anywhere, precast
+    effects:
+        @plant.stage = "flowering"
+
+reserved action set-fruit:
+    gloss: "@plant sets fruit in @plot"
+    tags: growth, stage, fruiting
+    roles:
+        @plant:
+            as: initiator
+        @plot:
+            as: location, anywhere, precast
+    effects:
+        @plant.stage = "fruiting"
+
+reserved action ripen:
+    gloss: "@plant ripens in @plot"
+    tags: growth, stage, ripening
+    roles:
+        @plant:
+            as: initiator
+        @plot:
+            as: location, anywhere, precast
+    effects:
+        @plant.stage = "ripe"
+
+reserved action go-to-seed:
+    gloss: "@plant goes to seed in @plot"
+    tags: growth, stage, senescence
+    roles:
+        @plant:
+            as: initiator
+        @plot:
+            as: location, anywhere, precast
+        @seed:
+            as: item, anywhere, precast
+    effects:
+        @plant.stage = "spent"
+        @seed inscribe @this
+
+
+// ── The plant-life plan ─────────────────────────────────────────────────────
+//
+// One instance per planted seed. Each phase waits on conditions of the plot
+// (or the plant), then queues the next stage action. The conditions don't
+// care who satisfied them — gardener, rainstorm, companion plant, pollinator
+// — only that they're true.
+
+plan plant-life:
+    roles:
+        @plant:
+            as: character
+        @plot:
+            as: location
+        @seed:
+            as: item
+    phases:
+        >dormant:
+            wait:
+                timeout: 365 days
+                until:
+                    @plot.moisture >= @plant.t.g_m
+                    @plot.warmth >= @plant.t.g_w
+            queue action germinate:
+                with:
+                    @plant: @plant
+                    @plot: @plot
+                urgent: true
+        >sprouting:
+            wait:
+                timeout: 365 days
+                until:
+                    @plot.moisture >= @plant.t.l_m
+                    @plot.nitrogen >= @plant.t.l_n
+            queue action leaf-out:
+                with:
+                    @plant: @plant
+                    @plot: @plot
+                urgent: true
+        >vegetative:
+            wait:
+                timeout: 365 days
+                until:
+                    @plot.warmth >= @plant.t.f_w
+                    @plot.nitrogen >= @plant.t.f_n
+            queue action flower:
+                with:
+                    @plant: @plant
+                    @plot: @plot
+                urgent: true
+        >flowering:
+            wait:
+                timeout: 365 days
+                until:
+                    @plant.pollinated
+            queue action set-fruit:
+                with:
+                    @plant: @plant
+                    @plot: @plot
+                urgent: true
+        >fruiting:
+            wait:
+                timeout: 365 days
+                until:
+                    @plot.warmth >= @plant.t.r_w
+                    @plot.moisture >= @plant.t.r_m
+            queue action ripen:
+                with:
+                    @plant: @plant
+                    @plot: @plot
+                urgent: true
+        >ripe:
+            wait:
+                timeout: 365 days
+                until:
+                    @plant.harvested
+            queue action go-to-seed:
+                with:
+                    @plant: @plant
+                    @plot: @plot
+                    @seed: @seed
+                urgent: true
+
+
+// ── Queries (search filters used by the sifting patterns below) ─────────────
+
+query ripenings:
+    action:
+        any: ripen
+
+query fruitings:
+    action:
+        any: set-fruit
+
+query player-tending:
+    action:
+        any: water-plot, mulch-plot, weed-pests, harvest-fruit, plant-seed
+
+query natural-care:
+    action:
+        any: rain-falls, sun-warms, bee-visits, clover-fixes-nitrogen
+
+query nitrogen-events:
+    action:
+        any: clover-fixes-nitrogen, mulch-plot
+
+query plantings:
+    action:
+        any: plant-seed
+
+
+// ── Sifting patterns (rake the season's chronicle for gardening styles) ────
+//
+// patient-cultivator: a ripening descends causally from natural events. The
+//   gardener may have done other things, but the fruit got there with
+//   nature's help.
+//
+// companion-planter: a fruiting was made possible by a clover-nitrogen event.
+//   The clover was planted by the gardener, but the actual nitrogen-fixing
+//   came from the clover plant itself.
+//
+// hands-on-grower: a ripening descends from multiple direct player-care
+//   actions. The gardener stayed close.
+
+pattern patient-cultivator:
+    actions:
+        @nature:
+            from: search query natural-care:
+                over: inherit
+        @ripening:
+            from: search query ripenings:
+                over: inherit
+    conditions:
+        @nature caused @ripening
+
+pattern companion-planter:
+    actions:
+        @planting:
+            from: search query plantings:
+                over: inherit
+        @nitrogen:
+            from: search query nitrogen-events:
+                over: inherit
+        @fruiting:
+            from: search query fruitings:
+                over: inherit
+    conditions:
+        @planting preceded @nitrogen
+        @nitrogen caused @fruiting
+
+pattern hands-on-grower:
+    actions:
+        @tending*:
+            from: search query player-tending:
+                over: inherit
+            n: 2-50
+        @ripening:
+            from: search query ripenings:
+                over: inherit
+    conditions:
+        loop @tending* as _@t:
+            _@t caused @ripening
+        end
