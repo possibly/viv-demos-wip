@@ -142,6 +142,79 @@ export const PLAYER_ACTION_CATALOG = [
   { name: "wait-day",     label: "Wait",      desc: "Skip a day. Nature continues without you." },
 ];
 
+// ── Plant quality system ────────────────────────────────────────────────────
+//
+// Each plant carries running tallies of how its plan got satisfied:
+//   sources: { water, rain, sun, clover, mulch, bee, pests }
+//   peaks:   { moisture, warmth, nitrogen } — high-water marks during life
+//
+// When a plant ripens, those tallies are run against the rule list below to
+// assign up to three traits. Same rules for every species; the label is
+// species-flavoured so the player can learn "rain water → Juicy tomato but
+// Plump bean" by watching outcomes accumulate in the journal.
+//
+// Order matters: earlier rules win when slots are limited. Each rule's
+// `explain` is what the journal records — a plain-English why.
+
+export const TRAIT_RULES = [
+  {
+    id: "rain-fed",
+    test: (s) => s.rain >= 2 && s.rain >= s.water * 1.5,
+    labels: { tomato: "Juicy", bean: "Plump", lavender: "Pale", sunflower: "Sturdy", clover: "Spreading" },
+    explain: "Most of its water came from rain — not your watering can.",
+  },
+  {
+    id: "hand-watered",
+    test: (s) => s.water >= 2 && s.water >= s.rain * 1.5,
+    labels: { tomato: "Tidy", bean: "Tender", lavender: "Compact", sunflower: "Trained", clover: "Tame" },
+    explain: "You did most of the watering yourself.",
+  },
+  {
+    id: "companion-fed",
+    test: (s) => s.clover >= 1,
+    labels: { tomato: "Sweet", bean: "Hearty", lavender: "Lush", sunflower: "Strong", clover: "Mingling" },
+    explain: "A nearby nitrogen-fixer (clover or bean) fertilized it.",
+  },
+  {
+    id: "mulched",
+    test: (s) => s.mulch >= 1,
+    labels: { tomato: "Earthy", bean: "Mellow", lavender: "Rich", sunflower: "Stout", clover: "Loamy" },
+    explain: "You mulched this plant's plot.",
+  },
+  {
+    id: "lush-soil",
+    test: (s, p) => p.nitrogen >= 45,
+    labels: { tomato: "Plump", bean: "Lush", lavender: "Leggy", sunflower: "Big-headed", clover: "Greedy" },
+    explain: "The plot's nitrogen rose well above the minimum to advance.",
+  },
+  {
+    id: "sun-blessed",
+    test: (s, p) => p.warmth >= 65,
+    labels: { tomato: "Sun-blessed", bean: "Sun-soaked", lavender: "Fragrant", sunflower: "Tall", clover: "Bronzed" },
+    explain: "Plot warmth went well above the threshold during fruiting.",
+  },
+  {
+    id: "bee-favored",
+    test: (s) => s.bee >= 2,
+    labels: { tomato: "Generous", bean: "Pod-heavy", lavender: "Beloved", sunflower: "Crowned", clover: "Honeyed" },
+    explain: "Multiple pollinator visits set richer fruit.",
+  },
+  {
+    id: "pest-touched",
+    test: (s) => s.pests >= 1,
+    labels: { tomato: "Scarred", bean: "Chewed", lavender: "Nipped", sunflower: "Holed", clover: "Patchy" },
+    explain: "Pests reached this plant before you did.",
+  },
+  {
+    id: "vigorous",
+    test: (s) => s.pests === 0 && s.water + s.rain + s.sun >= 4,
+    labels: { tomato: "Vigorous", bean: "Robust", lavender: "Whole", sunflower: "Proud", clover: "Glossy" },
+    explain: "It lived its life untouched by pests.",
+  },
+];
+
+const MAX_TRAITS = 3;
+
 // ── Initial state ──────────────────────────────────────────────────────────
 
 function buildInitialState(EntityType, rng) {
@@ -221,7 +294,66 @@ function buildInitialState(EntityType, rng) {
     // chronicle bookkeeping for the UI
     log: [],
     season: { ended: false, harvested: 0, ripened: 0, plantedCount: 0 },
+    // Cross-plant lessons. Keyed by `${species}:${traitId}` so the player can
+    // see "Sweet tomato — happens when a nitrogen-fixer feeds it."
+    journal: {},
   };
+}
+
+// Bump a plant's source-tally for whatever just happened to its plot.
+// Called from the player/nature action handlers.
+function attributePlot(state, plotId, kind, n = 1) {
+  const plot = state.entities[plotId];
+  if (!plot) return;
+  // Update peak measurements regardless of host plant; we read them when
+  // a plant first ripens in this plot.
+  if (plot.moisture > (plot._peakMoisture ?? 0)) plot._peakMoisture = plot.moisture;
+  if (plot.warmth   > (plot._peakWarmth   ?? 0)) plot._peakWarmth   = plot.warmth;
+  if (plot.nitrogen > (plot._peakNitrogen ?? 0)) plot._peakNitrogen = plot.nitrogen;
+
+  const plant = plot.hostPlant ? state.entities[plot.hostPlant] : null;
+  if (!plant || plant.stage === "spent") return;
+  plant.sources[kind] = (plant.sources[kind] ?? 0) + n;
+  // Peak tracking on the plant too — easier to consult at ripening time.
+  if (plot.moisture > plant.peaks.moisture) plant.peaks.moisture = plot.moisture;
+  if (plot.warmth   > plant.peaks.warmth)   plant.peaks.warmth   = plot.warmth;
+  if (plot.nitrogen > plant.peaks.nitrogen) plant.peaks.nitrogen = plot.nitrogen;
+}
+
+// Assign traits to a plant whose stage just turned "ripe". Up to MAX_TRAITS,
+// picked in TRAIT_RULES order. Each trait stores its species-flavoured label
+// and the explanation, so the journal can show "Sweet (because a clover fed
+// it)." without recomputing.
+function assignTraits(plant) {
+  if (plant.traits && plant.traits.length) return; // idempotent
+  const out = [];
+  for (const rule of TRAIT_RULES) {
+    if (out.length >= MAX_TRAITS) break;
+    if (rule.test(plant.sources, plant.peaks)) {
+      const label = rule.labels[plant.species] ?? rule.id;
+      out.push({ id: rule.id, label, explain: rule.explain });
+    }
+  }
+  plant.traits = out;
+}
+
+function recordTraitsInJournal(state, plant) {
+  for (const t of plant.traits ?? []) {
+    const key = `${plant.species}:${t.id}`;
+    const entry = state.journal[key];
+    if (entry) {
+      entry.count += 1;
+    } else {
+      state.journal[key] = {
+        species: plant.species,
+        traitId: t.id,
+        label:  t.label,
+        explain: t.explain,
+        firstSeenDay: state.day,
+        count: 1,
+      };
+    }
+  }
 }
 
 function makeSeed(state, EntityType, rng, speciesId, parentChronicleSummary) {
@@ -244,7 +376,7 @@ function makeSeed(state, EntityType, rng, speciesId, parentChronicleSummary) {
   return id;
 }
 
-function makePlant(state, EntityType, rng, speciesId, plotId) {
+function makePlant(state, EntityType, rng, speciesId, plotId, inheritedTraits = null) {
   const id = makeUUID(rng);
   const species = SPECIES[speciesId];
   state.entities[id] = {
@@ -259,6 +391,13 @@ function makePlant(state, EntityType, rng, speciesId, plotId) {
     harvested: false,
     memories: {},
     plantedDay: state.day,
+    // Tally of how this plant's plan got satisfied. Bumped by every action
+    // that touched its plot (player or nature). Used to assign traits when
+    // the plant ripens.
+    sources: { water: 0, rain: 0, sun: 0, clover: 0, mulch: 0, bee: 0, pests: 0 },
+    peaks:   { moisture: 0, warmth: 0, nitrogen: 0 },
+    traits: [],
+    inheritedTraits: inheritedTraits ?? [],
   };
   state.characters.push(id);
   state.plantIds.push(id);
@@ -461,6 +600,10 @@ export function initGame(runtime, bundle, seedStr) {
       location: e.location,
       vigor: e.vigor,
       plantedDay: e.plantedDay,
+      sources: { ...(e.sources ?? {}) },
+      peaks:   { ...(e.peaks ?? {}) },
+      traits:  (e.traits ?? []).map(t => ({ ...t })),
+      inheritedTraits: (e.inheritedTraits ?? []).map(t => ({ ...t })),
     };
   }
 
@@ -473,6 +616,7 @@ export function initGame(runtime, bundle, seedStr) {
       emoji: SPECIES[s.species].emoji,
       inscriptions: s.inscriptions?.length ?? 0,
       parentSummary: s.parentSummary,
+      parentTraits: (s.parentTraits ?? []).map(t => ({ ...t })),
     };
   }
 
@@ -484,6 +628,7 @@ export function initGame(runtime, bundle, seedStr) {
       plants: state.plantIds.map(plantView),
       inventory: state.inventory.map(s => seedView(s.id)),
       log: state.log,
+      journal: Object.values(state.journal ?? {}),
     };
   }
 
@@ -512,6 +657,7 @@ export function initGame(runtime, bundle, seedStr) {
         // Mulch slows moisture loss.
         const dry = plot.mulch > 0 ? 4 : 7;
         plot.moisture = clamp(plot.moisture - dry, 0, 100);
+        attributePlot(state, plotId, "sun");
         for (const a of fresh) events.push({ kind: "weather", text: a.gloss, actionId: a.id });
       }
     }
@@ -522,6 +668,7 @@ export function initGame(runtime, bundle, seedStr) {
         const fresh = await fireAction("rain-falls", "sky", { sky: ["sky"], plot: [plotId] });
         const plot = state.entities[plotId];
         plot.moisture = clamp(plot.moisture + 28, 0, 100);
+        attributePlot(state, plotId, "rain");
         for (const a of fresh) events.push({ kind: "weather", text: a.gloss, actionId: a.id });
       }
     }
@@ -536,6 +683,10 @@ export function initGame(runtime, bundle, seedStr) {
       if (rng() > sp.nitrogenFixChance) continue;
       const plotId = p.location;
       const fresh = await fireAction("clover-fixes-nitrogen", plantId, { plant: [plantId], plot: [plotId] });
+      // Self-feeding doesn't earn a "companion" trait; only feed other plants
+      // tagged with companion. (Beans feeding themselves still records as the
+      // chronicle action — just not attributed for the trait.)
+      attributePlot(state, plotId, "clover");
       for (const a of fresh) events.push({ kind: "companion", text: a.gloss, actionId: a.id });
     }
 
@@ -550,6 +701,7 @@ export function initGame(runtime, bundle, seedStr) {
       const chance = SPECIES[p.species].attractsPollinators ? 0.85 : (attracting ? 0.55 : 0.25);
       if (rng() < chance) {
         const fresh = await fireAction("bee-visits", "bee", { bee: ["bee"], plant: [p.id] });
+        p.sources.bee += 1;
         for (const a of fresh) events.push({ kind: "pollination", text: a.gloss, actionId: a.id });
       }
     }
@@ -563,6 +715,7 @@ export function initGame(runtime, bundle, seedStr) {
       if (rng() < baseChance) {
         const fresh = await fireAction("pest-nibbles", "bug", { bug: ["bug"], plant: [plantId] });
         plot.pests = (plot.pests ?? 0) + 1;
+        p.sources.pests += 1;
         for (const a of fresh) events.push({ kind: "pest", text: a.gloss, actionId: a.id });
       }
     }
@@ -584,6 +737,24 @@ export function initGame(runtime, bundle, seedStr) {
         text: a.gloss ?? a.report ?? a.name,
         actionId: a.id,
       });
+      // When a plant ripens, compute its traits from accumulated sources
+      // and record any new ones in the journal so the player can learn
+      // which actions tend to produce which qualities.
+      if (a.name === "ripen") {
+        const plantId = a.bindings?.plant?.[0];
+        const plant = plantId ? state.entities[plantId] : null;
+        if (plant && (!plant.traits || plant.traits.length === 0)) {
+          assignTraits(plant);
+          recordTraitsInJournal(state, plant);
+          if (plant.traits.length) {
+            fresh.push({
+              kind: "trait",
+              text: `${SPECIES[plant.species].name} ripens with traits: ${plant.traits.map(t => t.label).join(", ")}.`,
+              actionId: a.id,
+            });
+          }
+        }
+      }
       if (a.name === "go-to-seed") {
         const seedId = a.bindings?.seed?.[0];
         const plantId = a.bindings?.plant?.[0];
@@ -601,6 +772,7 @@ export function initGame(runtime, bundle, seedStr) {
     // on the seed records the go-to-seed action specifically; the full
     // lineage is reachable from there via the chronicle's causal graph.
     seed.parentSummary = summarizePlantLife(state, plant);
+    seed.parentTraits  = (plant.traits ?? []).map(t => ({ ...t }));
     seed.species = plant.species;
     seed.name = `${SPECIES[plant.species].name} seed`;
     state.inventory.push({ id: seedId, species: plant.species });
@@ -721,6 +893,7 @@ export function initGame(runtime, bundle, seedStr) {
       if (!plot) throw new Error("invalid plot");
       const fresh = await fireAction("water-plot", gid, { gardener: [gid], plot: [action.plotId] });
       plot.moisture = clamp(plot.moisture + 35, 0, 100);
+      attributePlot(state, action.plotId, "water");
       for (const a of fresh) events.push({ kind: "player", text: a.gloss, actionId: a.id });
       return fresh[0]?.id ?? null;
     }
@@ -732,6 +905,7 @@ export function initGame(runtime, bundle, seedStr) {
       plot.mulch += 1;
       plot.moisture = clamp(plot.moisture + 10, 0, 100);
       plot.nitrogen = clamp(plot.nitrogen + 6, 0, 100);
+      attributePlot(state, action.plotId, "mulch");
       for (const a of fresh) events.push({ kind: "player", text: a.gloss, actionId: a.id });
       return fresh[0]?.id ?? null;
     }
@@ -752,7 +926,9 @@ export function initGame(runtime, bundle, seedStr) {
       if (plot.hostPlant) throw new Error("plot is occupied");
 
       // Create the plant entity FIRST so we can precast it into the action.
-      const plantId = makePlant(state, EntityType, rng, seed.species, action.plotId);
+      // Inherited traits come from a saved seed's parent (visible badge only
+      // — they don't currently change biology, just preserve lineage).
+      const plantId = makePlant(state, EntityType, rng, seed.species, action.plotId, seed.parentTraits ?? []);
 
       const fresh = await fireAction("plant-seed", gid, {
         gardener: [gid],

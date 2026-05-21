@@ -24,6 +24,7 @@ const actionListEl   = document.getElementById("action-list");
 const actionHintEl   = document.getElementById("action-hint");
 const selectionBarEl = document.getElementById("selection-bar");
 const logEl          = document.getElementById("log");
+const journalEl      = document.getElementById("journal");
 const outcomeEl      = document.getElementById("outcome");
 
 function setStatus(msg, isError = false) {
@@ -81,6 +82,26 @@ function renderPlotInner(plot) {
     foot = `<div class="plot-foot"><span class="empty-plot-hint">Plant a seed to begin.</span></div>`;
   }
 
+  // Lineage badge: an inherited trait list from the seed this plant was
+  // grown from, so the player can see "this one came from a Sweet parent."
+  let lineage = "";
+  if (plot.plant && plot.plant.inheritedTraits?.length) {
+    const tags = plot.plant.inheritedTraits.map(t =>
+      `<span class="trait-tag inherited" title="Inherited: ${t.explain}">★ ${t.label}</span>`
+    ).join("");
+    lineage = `<div class="plot-lineage">From: ${tags}</div>`;
+  }
+
+  // Earned traits (assigned at ripening). These are the new qualities the
+  // plant developed this season — visible from "ripe" stage onward.
+  let traits = "";
+  if (plot.plant && plot.plant.traits?.length) {
+    const tags = plot.plant.traits.map(t =>
+      `<span class="trait-tag earned" title="${t.explain}">${t.label}</span>`
+    ).join("");
+    traits = `<div class="plot-traits">${tags}</div>`;
+  }
+
   return `
     <div class="plot-head">
       <span class="plot-name">${plot.name}</span>
@@ -88,6 +109,8 @@ function renderPlotInner(plot) {
     </div>
     <div class="plot-stats">${statRows}</div>
     ${foot}
+    ${traits}
+    ${lineage}
   `;
 }
 
@@ -101,13 +124,25 @@ function renderBasket(state) {
     const chip = document.createElement("button");
     chip.className = "seed-chip" + (selectedSeed === seed.id ? " selected" : "");
     chip.disabled = busy;
-    const lineage = seed.parentSummary
-      ? `<span class="seed-lineage" title="From a parent plant whose life produced ${seed.parentSummary.actionCount} chronicle entries.">★</span>`
-      : "";
-    chip.innerHTML = `<span class="seed-emoji">${seed.emoji}</span><span>${SPECIES[seed.species].name}</span>${lineage}`;
-    chip.title = seed.parentSummary
-      ? `Heirloom — last chapter: ${seed.parentSummary.headline}`
-      : SPECIES[seed.species].blurb;
+
+    // Show inherited trait labels right on the chip so the player can pick
+    // a "Sweet" seed deliberately when they want to breed that quality.
+    let traitLabels = "";
+    if (seed.parentTraits?.length) {
+      traitLabels = `<span class="seed-traits">${seed.parentTraits.map(t => `★ ${t.label}`).join(" · ")}</span>`;
+    } else if (seed.parentSummary) {
+      traitLabels = `<span class="seed-lineage">★ heirloom</span>`;
+    }
+    chip.innerHTML = `<span class="seed-emoji">${seed.emoji}</span><span>${SPECIES[seed.species].name}</span>${traitLabels}`;
+
+    const tooltipParts = [SPECIES[seed.species].blurb];
+    if (seed.parentTraits?.length) {
+      tooltipParts.push(...seed.parentTraits.map(t => `★ ${t.label} — ${t.explain}`));
+    } else if (seed.parentSummary) {
+      tooltipParts.push(`Heirloom — last chapter: ${seed.parentSummary.headline}`);
+    }
+    chip.title = tooltipParts.join("\n");
+
     chip.addEventListener("click", () => handleSeedClick(seed.id));
     basketEl.appendChild(chip);
   }
@@ -171,6 +206,34 @@ function renderActions(state) {
   }
 }
 
+function renderJournal(state) {
+  journalEl.innerHTML = "";
+  if (!state.journal.length) {
+    journalEl.innerHTML = `<div class="journal-empty">No traits observed yet. Plants get traits when they ripen — try planting clover next to a tomato, or mulching a plot, or letting rain do the watering, and see what changes.</div>`;
+    return;
+  }
+  // Group entries by species for readability.
+  const bySpecies = {};
+  for (const j of state.journal) (bySpecies[j.species] ??= []).push(j);
+  const speciesOrder = Object.keys(bySpecies).sort();
+  for (const sp of speciesOrder) {
+    const block = document.createElement("div");
+    block.className = "journal-species";
+    block.innerHTML = `<div class="journal-species-head">${SPECIES[sp].emoji} ${SPECIES[sp].name}</div>`;
+    for (const entry of bySpecies[sp]) {
+      const row = document.createElement("div");
+      row.className = "journal-row";
+      row.innerHTML = `
+        <span class="journal-trait">${entry.label}</span>
+        <span class="journal-explain">${entry.explain}</span>
+        <span class="journal-count">×${entry.count} · first d${entry.firstSeenDay}</span>
+      `;
+      block.appendChild(row);
+    }
+    journalEl.appendChild(block);
+  }
+}
+
 function renderLog(state) {
   logEl.innerHTML = "";
   const entries = state.log.slice(-80);
@@ -190,6 +253,7 @@ function renderAll() {
   renderBasket(state);
   renderSelection(state);
   renderActions(state);
+  renderJournal(state);
   renderLog(state);
 }
 

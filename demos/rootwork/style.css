@@ -289,6 +289,128 @@ main {
   line-height: 1.35;
 }
 
+/* ── Traits on plot cards ───────────────────────────────────────────────── */
+
+.plot-traits, .plot-lineage {
+  margin-top: 0.45rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+}
+
+.plot-lineage {
+  color: var(--text-muted);
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.trait-tag {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.72rem;
+  background: rgba(179, 200, 122, 0.12);
+  border: 1px solid #4d5a2e;
+  color: #c8d68a;
+  white-space: nowrap;
+}
+
+.trait-tag.inherited {
+  background: rgba(150, 170, 230, 0.08);
+  border-color: #3b4a6e;
+  color: #a7b8e6;
+}
+
+/* Seed chip — show parent traits inline. */
+.seed-traits {
+  font-size: 0.7rem;
+  color: #c8d68a;
+  margin-left: 0.25rem;
+}
+
+/* ── Garden journal ─────────────────────────────────────────────────────── */
+
+.journal-section { margin-bottom: 1.25rem; }
+
+.journal-hint {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: 0.4rem;
+  font-style: italic;
+}
+
+.journal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+}
+
+.journal-empty {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-style: italic;
+  line-height: 1.55;
+}
+
+.journal-species {
+  margin-bottom: 0.75rem;
+}
+.journal-species:last-child { margin-bottom: 0; }
+
+.journal-species-head {
+  font-size: 0.85rem;
+  color: var(--text);
+  margin-bottom: 0.35rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px dashed var(--border);
+}
+
+.journal-row {
+  display: grid;
+  grid-template-columns: 7rem 1fr auto;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.25rem 0;
+  font-size: 0.8rem;
+}
+
+.journal-trait {
+  font-weight: 500;
+  color: #c8d68a;
+}
+
+.journal-explain {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.journal-count {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+@media (max-width: 520px) {
+  .journal-row {
+    grid-template-columns: 1fr;
+    gap: 0.1rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px dashed var(--border);
+  }
+}
+
+/* ── Log entries that are "trait" announcements ─────────────────────────── */
+
+.log-entry.trait {
+  border-left-color: #c8d68a;
+  background: rgba(179, 200, 122, 0.06);
+}
+
 /* ── Chronicle log ──────────────────────────────────────────────────────── */
 
 .log-section { margin-bottom: 1.25rem; }
