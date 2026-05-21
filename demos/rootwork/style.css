@@ -208,6 +208,18 @@ main {
 .seed-chip.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 
 .seed-chip .seed-emoji { font-size: 1.1rem; }
+.seed-chip .seed-cultivar {
+  font-size: 0.78rem;
+  color: #c8d68a;
+}
+.seed-chip .seed-species {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+.seed-chip.hybrid {
+  border-style: dashed;
+  background: linear-gradient(135deg, var(--surface) 0%, #1f2316 100%);
+}
 .seed-chip .seed-lineage {
   font-size: 0.7rem;
   color: #c8d68a;
@@ -327,6 +339,256 @@ main {
   font-size: 0.7rem;
   color: #c8d68a;
   margin-left: 0.25rem;
+}
+
+.trait-tag.donor {
+  background: rgba(230, 169, 107, 0.10);
+  border-color: #6e4f29;
+  color: #e6c193;
+}
+
+/* Plot hybrid marker — small × next to species. */
+.plot-hybrid {
+  display: inline-block;
+  margin-left: 0.2rem;
+  font-size: 0.85em;
+  color: #e6c193;
+}
+
+/* Plot lineage link button-styled span. */
+.plot-pedigree-link {
+  display: inline-block;
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.plot-pedigree-link:hover { color: var(--text); }
+
+/* ── Popover (seed hover card) ──────────────────────────────────────────── */
+
+.popover {
+  position: absolute;
+  z-index: 50;
+  width: 280px;
+  background: var(--surface);
+  border: 1px solid #4d5a2e;
+  border-radius: 6px;
+  padding: 0.7rem 0.8rem;
+  font-size: 0.78rem;
+  color: var(--text);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+}
+.popover-head {
+  font-size: 0.92rem;
+  color: #c8d68a;
+  margin-bottom: 0.25rem;
+}
+.popover-blurb {
+  color: var(--text-muted);
+  font-style: italic;
+  margin-bottom: 0.45rem;
+  line-height: 1.4;
+}
+.popover-hybrid, .popover-gen {
+  font-size: 0.7rem;
+  color: #e6c193;
+  margin-bottom: 0.35rem;
+}
+.popover-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  font-family: var(--font-mono);
+  margin-bottom: 0.45rem;
+}
+.popover-row {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr auto;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  align-items: baseline;
+}
+.popover-phase { color: var(--text); }
+.popover-label { color: var(--text-muted); }
+.popover-val   { color: #c8d68a; text-align: right; }
+.popover-base  { color: var(--text-muted); font-size: 0.66rem; }
+
+.popover-section-head {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-top: 0.35rem;
+  margin-bottom: 0.2rem;
+}
+.popover-trait {
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--text);
+  margin-bottom: 0.15rem;
+}
+
+.popover-pedigree-btn {
+  margin-top: 0.5rem;
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.popover-pedigree-btn:hover { border-color: var(--accent); color: #c8d68a; }
+
+/* ── Pedigree modal ─────────────────────────────────────────────────────── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.modal-backdrop[hidden] { display: none; }
+.popover[hidden] { display: none; }
+.modal {
+  background: var(--surface);
+  border: 1px solid #4d5a2e;
+  border-radius: 8px;
+  padding: 1.2rem 1.2rem 1rem;
+  max-width: 560px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  position: relative;
+}
+.modal-close {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.5rem;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.5rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0.2rem 0.5rem;
+}
+.modal-close:hover { color: var(--text); }
+.modal-title {
+  font-size: 1rem;
+  color: #c8d68a;
+  margin-bottom: 0.8rem;
+}
+
+.pedigree {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.pedigree-node {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.6rem 0.7rem;
+  font-size: 0.82rem;
+}
+.pedigree-node.current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.pedigree-node.oldest {
+  border-style: dashed;
+}
+.pedigree-node-title {
+  color: var(--text);
+  font-weight: 500;
+  margin-bottom: 0.15rem;
+}
+.pedigree-node-sub {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  margin-bottom: 0.3rem;
+}
+.pedigree-traits {
+  margin-top: 0.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+  font-size: 0.72rem;
+}
+.pedigree-label {
+  color: var(--text-muted);
+  margin-right: 0.25rem;
+}
+.pedigree-arrow {
+  text-align: center;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  margin: 0.25rem 0;
+}
+.pedigree-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+/* ── Journal extras ────────────────────────────────────────────────────── */
+
+.journal-new-cultivar {
+  background: linear-gradient(90deg, rgba(200, 214, 138, 0.18) 0%, rgba(200, 214, 138, 0.06) 100%);
+  border: 1px solid #6a7d3e;
+  border-radius: 5px;
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.7rem;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+.journal-new-cultivar strong { color: #c8d68a; }
+
+.journal-inherit {
+  margin-top: 0.2rem;
+  font-size: 0.74rem;
+  color: #a7b8e6;
+  font-style: italic;
+}
+
+/* ── Outcome additions ────────────────────────────────────────────────── */
+
+.outcome-stable {
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: #c8d68a;
+  font-family: var(--font-mono);
+}
+
+.outcome-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.8rem;
+}
+.outcome-button.secondary {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  margin-top: 0;
+}
+.outcome-button.secondary:hover {
+  color: #e06c6c;
+  border-color: #6a3a3a;
+  opacity: 1;
 }
 
 /* ── Garden journal ─────────────────────────────────────────────────────── */

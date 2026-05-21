@@ -42,6 +42,7 @@ reserved action plant-seed:
             as: character, anywhere, precast
     effects:
         @gardener inspect @seed
+        @plant inspect @seed
     reactions:
         queue plan plant-life:
             with:
@@ -116,6 +117,25 @@ reserved action bee-visits:
     effects:
         @plant.pollinated = true
 
+// Bee carries pollen from @donor's flower to @recipient. The recipient's
+// destined seed gets inscribed with this action, so when it's planted next
+// season we know its other parent.
+reserved action cross-pollinate:
+    gloss: "A bee carries pollen from @donor to @recipient"
+    tags: nature, npc, pollination, cross
+    roles:
+        @bee:
+            as: initiator
+        @donor:
+            as: character, anywhere, precast
+        @recipient:
+            as: character, anywhere, precast
+        @seed:
+            as: item, anywhere, precast
+    effects:
+        @recipient.pollinated = true
+        @seed inscribe @this
+
 reserved action pest-nibbles:
     gloss: "Pests nibble at @plant"
     tags: pest, npc
@@ -138,6 +158,14 @@ reserved action germinate:
             as: initiator
         @plot:
             as: location, anywhere, precast
+        @ancestry:
+            as: action, anywhere
+            from: ~lastRipeningForPlant(@plant)
+            n: 0-1
+        @hybrid-origin:
+            as: action, anywhere
+            from: ~lastCrossForPlant(@plant)
+            n: 0-1
     effects:
         @plant.stage = "sprouting"
 
@@ -220,8 +248,8 @@ plan plant-life:
             wait:
                 timeout: 365 days
                 until:
-                    @plot.moisture >= 25
-                    @plot.warmth >= 20
+                    @plot.moisture >= @plant.t.g_m
+                    @plot.warmth >= @plant.t.g_w
             queue action germinate:
                 with:
                     @plant: @plant
@@ -231,8 +259,8 @@ plan plant-life:
             wait:
                 timeout: 365 days
                 until:
-                    @plot.moisture >= 15
-                    @plot.nitrogen >= 12
+                    @plot.moisture >= @plant.t.l_m
+                    @plot.nitrogen >= @plant.t.l_n
             queue action leaf-out:
                 with:
                     @plant: @plant
@@ -242,8 +270,8 @@ plan plant-life:
             wait:
                 timeout: 365 days
                 until:
-                    @plot.warmth >= 35
-                    @plot.nitrogen >= 18
+                    @plot.warmth >= @plant.t.f_w
+                    @plot.nitrogen >= @plant.t.f_n
             queue action flower:
                 with:
                     @plant: @plant
@@ -263,8 +291,8 @@ plan plant-life:
             wait:
                 timeout: 365 days
                 until:
-                    @plot.warmth >= 45
-                    @plot.moisture >= 12
+                    @plot.warmth >= @plant.t.r_w
+                    @plot.moisture >= @plant.t.r_m
             queue action ripen:
                 with:
                     @plant: @plant

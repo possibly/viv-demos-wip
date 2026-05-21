@@ -57,6 +57,17 @@
     <div class="outcome" id="outcome" hidden></div>
   </main>
 
+  <!-- Cultivar / seed preview popover -->
+  <div class="popover" id="popover" hidden role="dialog" aria-modal="false"></div>
+
+  <!-- Pedigree modal — shown when the player taps a "Lineage" link. -->
+  <div class="modal-backdrop" id="modal-backdrop" hidden>
+    <div class="modal" id="modal" role="dialog" aria-modal="true">
+      <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+      <div class="modal-content" id="modal-content"></div>
+    </div>
+  </div>
+
   <script type="module" src="main.js"></script>
 </body>
 </html>

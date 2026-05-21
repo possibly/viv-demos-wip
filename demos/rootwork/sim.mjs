@@ -107,6 +107,104 @@ export const SPECIES = {
 
 export const SPECIES_IDS = Object.keys(SPECIES);
 
+// ── Cultivars ───────────────────────────────────────────────────────────────
+//
+// Varietals within each species. `base` is the plant's per-phase threshold
+// table: the plan reads `@plant.t.<field>` against the plot. `sens.water` and
+// `sens.rain` are moisture-source multipliers applied when watering or rain
+// touches this plant's plot. Different cultivars feel measurably different
+// because the same action gives different results.
+//
+//   g_m, g_w → germinate moisture, warmth
+//   l_m, l_n → leaf-out moisture, nitrogen
+//   f_w, f_n → flower (vegetative→flowering) warmth, nitrogen
+//   r_w, r_m → ripen warmth, moisture
+export const CULTIVARS = {
+  tomato: {
+    roma: {
+      name: "Roma", blurb: "Plain, dependable. Average needs.",
+      base: { g_m: 22, g_w: 20, l_m: 14, l_n: 12, f_w: 35, f_n: 18, r_w: 45, r_m: 12 },
+      sens: { water: 1.0, rain: 1.0 },
+    },
+    cherry: {
+      name: "Cherry", blurb: "Many small fruits. Rain-loving, fast.",
+      base: { g_m: 18, g_w: 22, l_m: 12, l_n: 12, f_w: 32, f_n: 16, r_w: 42, r_m: 10 },
+      sens: { water: 0.8, rain: 1.3 },
+    },
+    beefsteak: {
+      name: "Beefsteak", blurb: "Big fruits. Nitrogen-hungry, slow.",
+      base: { g_m: 26, g_w: 22, l_m: 16, l_n: 22, f_w: 38, f_n: 28, r_w: 50, r_m: 14 },
+      sens: { water: 1.1, rain: 0.9 },
+    },
+  },
+  bean: {
+    bush: {
+      name: "Bush", blurb: "Compact. Less demanding.",
+      base: { g_m: 20, g_w: 18, l_m: 12, l_n: 10, f_w: 30, f_n: 14, r_w: 40, r_m: 10 },
+      sens: { water: 1.0, rain: 1.0 },
+    },
+    pole: {
+      name: "Pole", blurb: "Tall, climbs. Fixes more nitrogen but wants warmth.",
+      base: { g_m: 22, g_w: 22, l_m: 14, l_n: 12, f_w: 36, f_n: 16, r_w: 46, r_m: 12 },
+      sens: { water: 0.95, rain: 1.05 },
+    },
+  },
+  lavender: {
+    english: {
+      name: "English", blurb: "Hardy. Dry-loving.",
+      base: { g_m: 18, g_w: 22, l_m: 10, l_n: 8, f_w: 34, f_n: 12, r_w: 44, r_m: 8 },
+      sens: { water: 0.85, rain: 1.0 },
+    },
+    french: {
+      name: "French", blurb: "Showy. Wants more warmth.",
+      base: { g_m: 22, g_w: 26, l_m: 14, l_n: 12, f_w: 40, f_n: 16, r_w: 48, r_m: 12 },
+      sens: { water: 1.0, rain: 1.0 },
+    },
+  },
+  sunflower: {
+    mammoth: {
+      name: "Mammoth", blurb: "Tall. Drinks the sun and water.",
+      base: { g_m: 26, g_w: 24, l_m: 16, l_n: 14, f_w: 40, f_n: 18, r_w: 52, r_m: 14 },
+      sens: { water: 1.1, rain: 1.0 },
+    },
+    dwarf: {
+      name: "Dwarf", blurb: "Short, quick. Lower needs.",
+      base: { g_m: 20, g_w: 20, l_m: 12, l_n: 10, f_w: 34, f_n: 14, r_w: 44, r_m: 10 },
+      sens: { water: 0.95, rain: 1.05 },
+    },
+  },
+  clover: {
+    red: {
+      name: "Red", blurb: "Strong nitrogen-fixer.",
+      base: { g_m: 18, g_w: 16, l_m: 10, l_n: 8, f_w: 30, f_n: 10, r_w: 38, r_m: 8 },
+      sens: { water: 1.0, rain: 1.0 },
+      fixBoost: 1.15,
+    },
+    white: {
+      name: "White", blurb: "Moderate fixer. Spreads well.",
+      base: { g_m: 16, g_w: 16, l_m: 10, l_n: 8, f_w: 28, f_n: 10, r_w: 36, r_m: 8 },
+      sens: { water: 1.0, rain: 1.0 },
+      fixBoost: 1.0,
+    },
+  },
+};
+
+export function cultivarsFor(speciesId) {
+  return Object.entries(CULTIVARS[speciesId] ?? {}).map(([id, c]) => ({ id, ...c }));
+}
+
+export function defaultCultivarId(speciesId) {
+  return Object.keys(CULTIVARS[speciesId] ?? {})[0] ?? null;
+}
+
+function getCultivar(speciesId, cultivarId) {
+  const table = CULTIVARS[speciesId];
+  if (!table) return null;
+  if (cultivarId && table[cultivarId]) return { id: cultivarId, ...table[cultivarId] };
+  // Hybrid (e.g., "roma×cherry") — synthesized below in makePlant.
+  return null;
+}
+
 // Stage progression (string state machine; lifecycle advances are queued by
 // the Viv plant-life plan).
 export const STAGE_ORDER = [
@@ -156,62 +254,87 @@ export const PLAYER_ACTION_CATALOG = [
 // Order matters: earlier rules win when slots are limited. Each rule's
 // `explain` is what the journal records — a plain-English why.
 
+// Each rule's `inherit` modifies the NEXT plant's thresholds & sensitivities
+// when this trait is passed down via the seed. This is what makes a "Juicy"
+// seed feel different from a fresh seed — it's not just a badge.
 export const TRAIT_RULES = [
   {
     id: "rain-fed",
     test: (s) => s.rain >= 2 && s.rain >= s.water * 1.5,
     labels: { tomato: "Juicy", bean: "Plump", lavender: "Pale", sunflower: "Sturdy", clover: "Spreading" },
     explain: "Most of its water came from rain — not your watering can.",
+    inheritExplain: "Descendents germinate easier in rain (-6 moisture) and gain more from rainfall (+30%).",
+    inherit: { t: { g_m: -6 }, sens: { rain: 0.30, water: -0.20 } },
   },
   {
     id: "hand-watered",
     test: (s) => s.water >= 2 && s.water >= s.rain * 1.5,
     labels: { tomato: "Tidy", bean: "Tender", lavender: "Compact", sunflower: "Trained", clover: "Tame" },
     explain: "You did most of the watering yourself.",
+    inheritExplain: "Descendents gain more from your watering can (+30%) but less from rain.",
+    inherit: { t: { g_m: -4 }, sens: { water: 0.30, rain: -0.20 } },
   },
   {
     id: "companion-fed",
     test: (s) => s.clover >= 1,
     labels: { tomato: "Sweet", bean: "Hearty", lavender: "Lush", sunflower: "Strong", clover: "Mingling" },
     explain: "A nearby nitrogen-fixer (clover or bean) fertilized it.",
+    inheritExplain: "Descendents need less nitrogen to leaf out and to fruit.",
+    inherit: { t: { l_n: -6, f_n: -4 } },
   },
   {
     id: "mulched",
     test: (s) => s.mulch >= 1,
     labels: { tomato: "Earthy", bean: "Mellow", lavender: "Rich", sunflower: "Stout", clover: "Loamy" },
     explain: "You mulched this plant's plot.",
+    inheritExplain: "Descendents hold moisture better (slower drying not yet modeled — for now, easier germination).",
+    inherit: { t: { g_m: -2 } },
   },
   {
     id: "lush-soil",
     test: (s, p) => p.nitrogen >= 45,
     labels: { tomato: "Plump", bean: "Lush", lavender: "Leggy", sunflower: "Big-headed", clover: "Greedy" },
     explain: "The plot's nitrogen rose well above the minimum to advance.",
+    inheritExplain: "Descendents got used to rich soil — they now demand more nitrogen.",
+    inherit: { t: { l_n: 4, f_n: 6 } },
   },
   {
     id: "sun-blessed",
     test: (s, p) => p.warmth >= 65,
     labels: { tomato: "Sun-blessed", bean: "Sun-soaked", lavender: "Fragrant", sunflower: "Tall", clover: "Bronzed" },
     explain: "Plot warmth went well above the threshold during fruiting.",
+    inheritExplain: "Descendents flower and ripen at lower warmth (-4 each).",
+    inherit: { t: { f_w: -4, r_w: -4 } },
   },
   {
     id: "bee-favored",
     test: (s) => s.bee >= 2,
     labels: { tomato: "Generous", bean: "Pod-heavy", lavender: "Beloved", sunflower: "Crowned", clover: "Honeyed" },
     explain: "Multiple pollinator visits set richer fruit.",
+    inheritExplain: "Descendents attract pollinators more readily.",
+    inherit: { beeAttract: 0.15 },
   },
   {
     id: "pest-touched",
     test: (s) => s.pests >= 1,
     labels: { tomato: "Scarred", bean: "Chewed", lavender: "Nipped", sunflower: "Holed", clover: "Patchy" },
     explain: "Pests reached this plant before you did.",
+    inheritExplain: "Descendents are more vulnerable to pests.",
+    inherit: { pestResist: -0.30 },
   },
   {
     id: "vigorous",
     test: (s) => s.pests === 0 && s.water + s.rain + s.sun >= 4,
     labels: { tomato: "Vigorous", bean: "Robust", lavender: "Whole", sunflower: "Proud", clover: "Glossy" },
     explain: "It lived its life untouched by pests.",
+    inheritExplain: "Descendents resist pests better (+50%).",
+    inherit: { pestResist: 0.50 },
   },
 ];
+
+export function traitRule(traitId) {
+  return TRAIT_RULES.find(r => r.id === traitId) ?? null;
+}
 
 const MAX_TRAITS = 3;
 
@@ -293,10 +416,67 @@ function buildInitialState(EntityType, rng) {
     inventory: [],
     // chronicle bookkeeping for the UI
     log: [],
-    season: { ended: false, harvested: 0, ripened: 0, plantedCount: 0 },
+    season: { ended: false, harvested: 0, ripened: 0, plantedCount: 0, seasonNumber: 1 },
     // Cross-plant lessons. Keyed by `${species}:${traitId}` so the player can
     // see "Sweet tomato — happens when a nitrogen-fixer feeds it."
     journal: {},
+    // Local cultivars stabilized through breeding. Keyed `${species}:${id}`.
+    localCultivars: {},
+    // Hybrid lineage tracking: for each (species, fingerprint), count
+    // consecutive consistent generations. At 3, promote to a named cultivar.
+    hybridStability: {},
+    // Lineage graph: a parallel data structure for the pedigree view that
+    // survives season resets (chronicle gets wiped between seasons).
+    lineage: {},
+    // Newest cultivar promotions (so the UI can highlight them this session).
+    newCultivars: [],
+  };
+}
+
+// ── Persistence ────────────────────────────────────────────────────────────
+
+const SAVE_KEY = "rootwork:save:v1";
+
+export function loadSave() {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+
+export function saveSave(save) {
+  if (typeof localStorage === "undefined") return;
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch { /* full disk etc — ignore */ }
+}
+
+export function clearSave() {
+  if (typeof localStorage === "undefined") return;
+  try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ }
+}
+
+function serializeForSave(state) {
+  // Persist only what's needed to continue the breeding loop next season.
+  const seedRecords = state.inventory.map(s => {
+    const e = state.entities[s.id];
+    return {
+      id: e.id, species: e.species, cultivarId: e.cultivarId,
+      name: e.name, inscriptions: e.inscriptions ?? [],
+      parentSummary: e.parentSummary, parentTraits: e.parentTraits ?? [],
+      donorTraits: e.donorTraits ?? [], donorCultivarId: e.donorCultivarId,
+      parentSeedId: e.parentSeedId, donorSeedId: e.donorSeedId,
+      generation: e.generation ?? 1,
+    };
+  });
+  return {
+    version: 1,
+    seasonNumber: (state.season?.seasonNumber ?? 1) + 1,
+    inventory: seedRecords,
+    journal: state.journal,
+    localCultivars: state.localCultivars,
+    hybridStability: state.hybridStability,
+    lineage: state.lineage,
   };
 }
 
@@ -356,34 +536,123 @@ function recordTraitsInJournal(state, plant) {
   }
 }
 
-function makeSeed(state, EntityType, rng, speciesId, parentChronicleSummary) {
+function makeSeed(state, EntityType, rng, speciesId, opts = {}) {
   const id = makeUUID(rng);
+  const cultivarId = opts.cultivarId ?? defaultCultivarId(speciesId);
+  const cultivarName = cultivarLabelFor(state, speciesId, cultivarId);
   state.entities[id] = {
     entityType: EntityType.Item,
     id,
-    name: `${SPECIES[speciesId].name} seed`,
+    name: `${cultivarName} ${SPECIES[speciesId].name} seed`,
     species: speciesId,
+    cultivarId,
     inscriptions: [],
     location: "garden",
-    // Inheriting parent's life summary lets us narrate "this seed descends
-    // from..." without relying on inscribe alone (which only carries the
-    // single go-to-seed action). The full causal lineage is reachable via
-    // the chronicle.
-    parentSummary: parentChronicleSummary ?? null,
+    parentSummary: opts.parentSummary ?? null,
+    parentTraits: opts.parentTraits ?? [],
+    donorTraits: opts.donorTraits ?? [],
+    donorCultivarId: opts.donorCultivarId ?? null,
+    parentSeedId: opts.parentSeedId ?? null,
+    donorSeedId: opts.donorSeedId ?? null,
+    generation: opts.generation ?? 1,
   };
   state.items.push(id);
   state.seedIds.push(id);
   return id;
 }
 
-function makePlant(state, EntityType, rng, speciesId, plotId, inheritedTraits = null) {
+// Build the per-plant threshold table and sensitivity multipliers from
+// (a) cultivar base, (b) inherited-trait modifiers from parent, (c) donor
+// modifiers if hybrid. Trait modifiers stack additively.
+function deriveThresholds(speciesId, cultivarId, inheritedTraits, donorTraits, localCultivars) {
+  const t = { g_m: 22, g_w: 20, l_m: 14, l_n: 12, f_w: 35, f_n: 18, r_w: 45, r_m: 12 };
+  const sens = { water: 1.0, rain: 1.0 };
+  let beeAttract = 0;
+  let pestResist = 0;
+  let fixBoost = null;
+
+  // Resolve cultivar — could be a base entry, a hybrid like "roma×cherry"
+  // (we average the two), or a stable local cultivar from a prior run.
+  const c = resolveCultivar(speciesId, cultivarId, localCultivars);
+  if (c) {
+    Object.assign(t, c.base);
+    Object.assign(sens, c.sens ?? {});
+    if (c.fixBoost) fixBoost = c.fixBoost;
+  }
+
+  for (const tr of [...(inheritedTraits ?? []), ...(donorTraits ?? [])]) {
+    const rule = traitRule(tr.id);
+    if (!rule?.inherit) continue;
+    if (rule.inherit.t) for (const [k, v] of Object.entries(rule.inherit.t)) t[k] = (t[k] ?? 0) + v;
+    if (rule.inherit.sens) for (const [k, v] of Object.entries(rule.inherit.sens)) sens[k] = (sens[k] ?? 1) + v;
+    if (rule.inherit.beeAttract) beeAttract += rule.inherit.beeAttract;
+    if (rule.inherit.pestResist) pestResist += rule.inherit.pestResist;
+  }
+  // Clamp thresholds to sane minimums so a heavily-inherited plant can't go
+  // below zero and germinate instantly off zero moisture.
+  for (const k of Object.keys(t)) t[k] = Math.max(2, Math.round(t[k]));
+  sens.water = Math.max(0.2, sens.water);
+  sens.rain  = Math.max(0.2, sens.rain);
+  pestResist = clamp(pestResist, -0.9, 0.9);
+  beeAttract = clamp(beeAttract, 0, 0.6);
+
+  return { t, sens, beeAttract, pestResist, fixBoost };
+}
+
+function resolveCultivar(speciesId, cultivarId, localCultivars) {
+  if (!cultivarId) return null;
+  // Local stable cultivar from prior breeding (registered at runtime).
+  const local = localCultivars?.[`${speciesId}:${cultivarId}`];
+  if (local) return local;
+  // Hybrid notation: "parent×donor" — average the two cultivars' bases.
+  if (cultivarId.includes("×")) {
+    const [a, b] = cultivarId.split("×");
+    const ca = CULTIVARS[speciesId]?.[a];
+    const cb = CULTIVARS[speciesId]?.[b];
+    if (ca && cb) {
+      const base = {};
+      for (const k of Object.keys(ca.base)) base[k] = Math.round((ca.base[k] + cb.base[k]) / 2);
+      const sens = {
+        water: ((ca.sens?.water ?? 1) + (cb.sens?.water ?? 1)) / 2,
+        rain:  ((ca.sens?.rain  ?? 1) + (cb.sens?.rain  ?? 1)) / 2,
+      };
+      return { base, sens, hybrid: true };
+    }
+    if (ca) return { id: a, ...ca };
+    if (cb) return { id: b, ...cb };
+    return null;
+  }
+  const c = CULTIVARS[speciesId]?.[cultivarId];
+  return c ? { id: cultivarId, ...c } : null;
+}
+
+function cultivarLabelFor(state, speciesId, cultivarId) {
+  if (!cultivarId) return SPECIES[speciesId].name;
+  const local = state?.localCultivars?.[`${speciesId}:${cultivarId}`];
+  if (local) return local.name;
+  if (cultivarId.includes("×")) {
+    const [a, b] = cultivarId.split("×");
+    const ca = CULTIVARS[speciesId]?.[a]?.name ?? a;
+    const cb = CULTIVARS[speciesId]?.[b]?.name ?? b;
+    return `${ca}×${cb}`;
+  }
+  return CULTIVARS[speciesId]?.[cultivarId]?.name ?? cultivarId;
+}
+
+function makePlant(state, EntityType, rng, speciesId, plotId, opts = {}) {
   const id = makeUUID(rng);
   const species = SPECIES[speciesId];
+  const cultivarId = opts.cultivarId ?? defaultCultivarId(speciesId);
+  const inheritedTraits = opts.inheritedTraits ?? [];
+  const donorTraits = opts.donorTraits ?? [];
+  const derived = deriveThresholds(speciesId, cultivarId, inheritedTraits, donorTraits, state.localCultivars);
+
   state.entities[id] = {
     entityType: EntityType.Character,
     id,
-    name: species.name,
+    name: `${cultivarLabelFor(state, speciesId, cultivarId)} ${species.name}`,
     species: speciesId,
+    cultivarId,
     location: plotId,
     stage: "dormant",
     vigor: 4,
@@ -392,12 +661,22 @@ function makePlant(state, EntityType, rng, speciesId, plotId, inheritedTraits = 
     memories: {},
     plantedDay: state.day,
     // Tally of how this plant's plan got satisfied. Bumped by every action
-    // that touched its plot (player or nature). Used to assign traits when
-    // the plant ripens.
+    // that touched its plot. Used to assign traits when the plant ripens.
     sources: { water: 0, rain: 0, sun: 0, clover: 0, mulch: 0, bee: 0, pests: 0 },
     peaks:   { moisture: 0, warmth: 0, nitrogen: 0 },
     traits: [],
-    inheritedTraits: inheritedTraits ?? [],
+    inheritedTraits,
+    donorTraits,
+    donorCultivarId: opts.donorCultivarId ?? null,
+    parentSeedId: opts.parentSeedId ?? null,
+    donorSeedId: opts.donorSeedId ?? null,
+    generation: opts.generation ?? 1,
+    // The plan reads from `@plant.t.<field>`; sensitivity is read in JS.
+    t: derived.t,
+    sens: derived.sens,
+    beeAttract: derived.beeAttract,
+    pestResist: derived.pestResist,
+    fixBoost: derived.fixBoost,
   };
   state.characters.push(id);
   state.plantIds.push(id);
@@ -514,6 +793,40 @@ export function initGame(runtime, bundle, seedStr) {
     saveVivInternalState: (s) => { state.vivInternalState = structuredClone(s); },
     saveCharacterMemory: (cid, aid, mem) => { state.entities[cid].memories[aid] = mem; },
     saveItemInscriptions: (iid, ins) => { state.entities[iid].inscriptions = ins; },
+    functions: {
+      // Casting pools for germinate's @ancestry / @hybrid-origin roles.
+      // Each returns the most recent matching action ID as a single-element
+      // list (or empty). The action-typed roles auto-wire these returned
+      // actions as direct causes of `germinate`, so pedigree walks via
+      // entity.causes work for free.
+      lastRipeningForPlant: (plantArg) => {
+        const plantId = Array.isArray(plantArg) ? plantArg[0] : plantArg;
+        const plant = state.entities[plantId];
+        if (!plant) return [];
+        const parentSeedId = plant.parentSeedId;
+        if (!parentSeedId) return [];
+        // Find the ripen action whose plant was grown from the same seed.
+        for (let i = state.actions.length - 1; i >= 0; i--) {
+          const a = state.entities[state.actions[i]];
+          if (a?.name !== "ripen") continue;
+          const ripenPlantId = a.bindings?.plant?.[0];
+          const ripenPlant = ripenPlantId ? state.entities[ripenPlantId] : null;
+          if (ripenPlant?.destinedSeedId === parentSeedId) return [state.actions[i]];
+        }
+        return [];
+      },
+      lastCrossForPlant: (plantArg) => {
+        const plantId = Array.isArray(plantArg) ? plantArg[0] : plantArg;
+        const plant = state.entities[plantId];
+        if (!plant?.parentSeedId) return [];
+        for (let i = state.actions.length - 1; i >= 0; i--) {
+          const a = state.entities[state.actions[i]];
+          if (a?.name !== "cross-pollinate") continue;
+          if (a.bindings?.seed?.[0] === plant.parentSeedId) return [state.actions[i]];
+        }
+        return [];
+      },
+    },
     debug: { validateAPICalls: true, watchlists: {} },
   };
 
@@ -589,6 +902,10 @@ export function initGame(runtime, bundle, seedStr) {
       id: plantId,
       name: e.name,
       species: e.species,
+      cultivarId: e.cultivarId,
+      cultivarName: cultivarLabelFor(state, e.species, e.cultivarId),
+      donorCultivarId: e.donorCultivarId,
+      isHybrid: !!(e.cultivarId && e.cultivarId.includes("×")),
       emoji: species.emoji,
       blurb: species.blurb,
       stage: e.stage,
@@ -604,6 +921,10 @@ export function initGame(runtime, bundle, seedStr) {
       peaks:   { ...(e.peaks ?? {}) },
       traits:  (e.traits ?? []).map(t => ({ ...t })),
       inheritedTraits: (e.inheritedTraits ?? []).map(t => ({ ...t })),
+      donorTraits: (e.donorTraits ?? []).map(t => ({ ...t })),
+      t: { ...(e.t ?? {}) },
+      sens: { ...(e.sens ?? {}) },
+      generation: e.generation ?? 1,
     };
   }
 
@@ -613,10 +934,36 @@ export function initGame(runtime, bundle, seedStr) {
       id: seedId,
       name: s.name,
       species: s.species,
+      cultivarId: s.cultivarId,
+      cultivarName: cultivarLabelFor(state, s.species, s.cultivarId),
+      donorCultivarId: s.donorCultivarId,
+      donorCultivarName: s.donorCultivarId
+        ? cultivarLabelFor(state, s.species, s.donorCultivarId)
+        : null,
+      isHybrid: !!(s.cultivarId && s.cultivarId.includes("×")),
       emoji: SPECIES[s.species].emoji,
       inscriptions: s.inscriptions?.length ?? 0,
       parentSummary: s.parentSummary,
       parentTraits: (s.parentTraits ?? []).map(t => ({ ...t })),
+      donorTraits: (s.donorTraits ?? []).map(t => ({ ...t })),
+      generation: s.generation ?? 1,
+      parentSeedId: s.parentSeedId ?? null,
+      donorSeedId: s.donorSeedId ?? null,
+      // What this seed will produce when planted — pre-derived so the player
+      // can see "Juicy Cherry tomato: germinates at moisture 12, base 18."
+      preview: previewForSeed(s),
+    };
+  }
+
+  function previewForSeed(seed) {
+    const cultivar = resolveCultivar(seed.species, seed.cultivarId, state.localCultivars);
+    const base = cultivar?.base ?? null;
+    const derived = deriveThresholds(seed.species, seed.cultivarId, seed.parentTraits ?? [], seed.donorTraits ?? [], state.localCultivars);
+    return {
+      cultivarName: cultivarLabelFor(state, seed.species, seed.cultivarId),
+      blurb: cultivar?.blurb ?? "",
+      base, t: derived.t, sens: derived.sens,
+      beeAttract: derived.beeAttract, pestResist: derived.pestResist,
     };
   }
 
@@ -629,6 +976,9 @@ export function initGame(runtime, bundle, seedStr) {
       inventory: state.inventory.map(s => seedView(s.id)),
       log: state.log,
       journal: Object.values(state.journal ?? {}),
+      localCultivars: { ...state.localCultivars },
+      newCultivars: [...state.newCultivars],
+      lineage: state.lineage,
     };
   }
 
@@ -662,57 +1012,93 @@ export function initGame(runtime, bundle, seedStr) {
       }
     }
 
-    // Rain on a random subset (~25% chance per plot per day).
+    // Rain on a random subset (~22% chance per plot per day). Moisture
+    // gained is multiplied by the host plant's `sens.rain` — a Rain-fed
+    // Cherry actually drinks rain more deeply than a Hand-watered Beefsteak.
     for (const plotId of state.plotIds) {
       if (rng() < 0.22) {
         const fresh = await fireAction("rain-falls", "sky", { sky: ["sky"], plot: [plotId] });
         const plot = state.entities[plotId];
-        plot.moisture = clamp(plot.moisture + 28, 0, 100);
+        const sens = plot.hostPlant ? (state.entities[plot.hostPlant].sens?.rain ?? 1) : 1;
+        plot.moisture = clamp(plot.moisture + Math.round(28 * sens), 0, 100);
         attributePlot(state, plotId, "rain");
         for (const a of fresh) events.push({ kind: "weather", text: a.gloss, actionId: a.id });
       }
     }
 
     // Clover/bean fix nitrogen in their own plot. Treated as the plant's
-    // own action — its initiator is the plant.
+    // own action — its initiator is the plant. Some cultivars boost the fix.
     for (const plantId of state.plantIds) {
       const p = state.entities[plantId];
       if (p.stage === "spent" || p.stage === "dormant") continue;
       const sp = SPECIES[p.species];
       if (!sp.fixesNitrogen) continue;
-      if (rng() > sp.nitrogenFixChance) continue;
+      const chance = sp.nitrogenFixChance * (p.fixBoost ?? 1);
+      if (rng() > chance) continue;
       const plotId = p.location;
       const fresh = await fireAction("clover-fixes-nitrogen", plantId, { plant: [plantId], plot: [plotId] });
-      // Self-feeding doesn't earn a "companion" trait; only feed other plants
-      // tagged with companion. (Beans feeding themselves still records as the
-      // chronicle action — just not attributed for the trait.)
       attributePlot(state, plotId, "clover");
       for (const a of fresh) events.push({ kind: "companion", text: a.gloss, actionId: a.id });
     }
 
-    // Pollinator visits: any flowering plant gets a visit chance, boosted
-    // if there's a pollinator-attracting plant flowering anywhere.
+    // Pollinator visits and opportunistic cross-pollination. A bee that
+    // lands on a flowering plant can, with some probability, also carry
+    // pollen from another flowering plant of the same species (different
+    // cultivar) — that fires a `cross-pollinate` action, which inscribes
+    // the recipient's eventual seed with the donor's identity.
     const flowering = state.plantIds
       .map(id => state.entities[id])
       .filter(p => p.stage === "flowering" || p.stage === "vegetative");
     const attracting = flowering.some(p => SPECIES[p.species].attractsPollinators);
     for (const p of flowering) {
       if (p.stage !== "flowering" || p.pollinated) continue;
-      const chance = SPECIES[p.species].attractsPollinators ? 0.85 : (attracting ? 0.55 : 0.25);
+      const beeAttract = p.beeAttract ?? 0;
+      const base = SPECIES[p.species].attractsPollinators ? 0.85 : (attracting ? 0.55 : 0.25);
+      const chance = clamp(base + beeAttract, 0, 0.98);
       if (rng() < chance) {
         const fresh = await fireAction("bee-visits", "bee", { bee: ["bee"], plant: [p.id] });
         p.sources.bee += 1;
         for (const a of fresh) events.push({ kind: "pollination", text: a.gloss, actionId: a.id });
+
+        // Try cross-pollination: any OTHER flowering plant of the same
+        // species but a different cultivar that's currently in bloom.
+        const donor = flowering.find(other =>
+          other.id !== p.id
+          && other.species === p.species
+          && other.cultivarId !== p.cultivarId
+          && (other.stage === "flowering" || other.pollinated)
+        );
+        if (donor) {
+          // Find a seed item to inscribe. Each plot has a "destined" seed
+          // entity created at planting; cross-pollinate inscribes it.
+          const recipientSeedId = findSeedForPlant(p.id);
+          if (recipientSeedId) {
+            const cFresh = await fireAction("cross-pollinate", "bee", {
+              bee: ["bee"],
+              donor: [donor.id],
+              recipient: [p.id],
+              seed: [recipientSeedId],
+            });
+            // Stash the cross on the seed for replant-time blending.
+            const seed = state.entities[recipientSeedId];
+            seed.crossedWith = donor.id;
+            seed.crossedWithCultivar = donor.cultivarId;
+            seed.crossedWithTraits = (donor.inheritedTraits ?? []).map(t => ({ ...t }));
+            for (const a of cFresh) events.push({ kind: "pollination", text: a.gloss + ` (cross with ${cultivarLabelFor(state, donor.species, donor.cultivarId)})`, actionId: a.id });
+          }
+        }
       }
     }
 
-    // Pests: occasional, mostly on plants whose plot has no mulch.
+    // Pests: occasional, mostly on plants whose plot has no mulch. The
+    // plant's pestResist modifies the chance (Vigorous descendents resist).
     for (const plantId of state.plantIds) {
       const p = state.entities[plantId];
       if (p.stage === "spent" || p.stage === "dormant") continue;
       const plot = state.entities[p.location];
       const baseChance = plot.mulch > 0 ? 0.04 : 0.12;
-      if (rng() < baseChance) {
+      const adjusted = clamp(baseChance * (1 - (p.pestResist ?? 0)), 0, 0.5);
+      if (rng() < adjusted) {
         const fresh = await fireAction("pest-nibbles", "bug", { bug: ["bug"], plant: [plantId] });
         plot.pests = (plot.pests ?? 0) + 1;
         p.sources.pests += 1;
@@ -721,6 +1107,13 @@ export function initGame(runtime, bundle, seedStr) {
     }
 
     return events;
+  }
+
+  // Each plant gets a designated "future seed" entity at planting time so
+  // cross-pollinate has something to inscribe onto BEFORE go-to-seed fires.
+  function findSeedForPlant(plantId) {
+    const plant = state.entities[plantId];
+    return plant?.destinedSeedId ?? null;
   }
 
   // After every action chain, advance plans + drain queued reactions, then
@@ -774,8 +1167,72 @@ export function initGame(runtime, bundle, seedStr) {
     seed.parentSummary = summarizePlantLife(state, plant);
     seed.parentTraits  = (plant.traits ?? []).map(t => ({ ...t }));
     seed.species = plant.species;
-    seed.name = `${SPECIES[plant.species].name} seed`;
+    seed.cultivarId = plant.cultivarId;
+    seed.donorCultivarId = seed.crossedWithCultivar ?? plant.donorCultivarId ?? null;
+    seed.donorTraits = seed.crossedWithTraits ?? plant.donorTraits ?? [];
+    seed.donorSeedId = null; // donor's seed ID is from a different parent — not tracked here
+    seed.name = `${cultivarLabelFor(state, plant.species, plant.cultivarId)} ${SPECIES[plant.species].name} seed`;
+    seed.generation = (plant.generation ?? 1) + 1;
     state.inventory.push({ id: seedId, species: plant.species });
+
+    // Record on the lineage node that this plant produced this seed, so
+    // future pedigree walks can hop "seed → producing plant → its parent
+    // seed → its producing plant…" across seasons.
+    if (state.lineage[plant.id]) {
+      state.lineage[plant.id].producedSeedId = seed.id;
+      state.lineage[plant.id].earnedTraits = (plant.traits ?? []).map(t => ({ ...t }));
+    }
+
+    // Stable-cultivar promotion: if this plant is a hybrid (or already a
+    // local cultivar) and its (parent cultivar pair + trait fingerprint)
+    // matches what we've seen 3 generations in a row, give it a name.
+    promoteIfStable(plant);
+  }
+
+  function promoteIfStable(plant) {
+    const isHybrid = plant.cultivarId && plant.cultivarId.includes("×");
+    const isLocal = !!state.localCultivars[`${plant.species}:${plant.cultivarId}`];
+    if (!isHybrid && !isLocal) return;
+    const fingerprint = hybridFingerprint(plant);
+    const key = `${plant.species}:${fingerprint}`;
+    const rec = state.hybridStability[key] ?? { count: 0, lastSeason: 0 };
+    rec.count = (rec.lastSeason === state.season.seasonNumber) ? rec.count : rec.count + 1;
+    rec.lastSeason = state.season.seasonNumber;
+    state.hybridStability[key] = rec;
+    if (rec.count >= 3 && isHybrid) {
+      const name = inventCultivarName(plant);
+      const localId = `local-${Object.keys(state.localCultivars).length + 1}`;
+      const cultivar = resolveCultivar(plant.species, plant.cultivarId, state.localCultivars);
+      const base = cultivar?.base ?? { g_m: 22, g_w: 20, l_m: 14, l_n: 12, f_w: 35, f_n: 18, r_w: 45, r_m: 12 };
+      const sens = cultivar?.sens ?? { water: 1, rain: 1 };
+      state.localCultivars[`${plant.species}:${localId}`] = {
+        id: localId, name, blurb: `Stable local strain bred in your garden (gen ${plant.generation}).`,
+        base, sens, parentHybridId: plant.cultivarId, traits: (plant.inheritedTraits ?? []).map(t => t.id),
+      };
+      state.newCultivars.push({ species: plant.species, cultivarId: localId, name });
+      addLogEntry({
+        kind: "trait",
+        text: `New cultivar stabilized: ${name} ${SPECIES[plant.species].name}. Future ${plant.cultivarId} hybrids breed true as this strain.`,
+      });
+    }
+  }
+
+  function hybridFingerprint(plant) {
+    const traitIds = [...(plant.inheritedTraits ?? []).map(t => t.id), ...(plant.donorTraits ?? []).map(t => t.id)].sort();
+    return `${plant.cultivarId}|${traitIds.join(",")}`;
+  }
+
+  function inventCultivarName(plant) {
+    // Use the dominant trait flavour for a punchy name.
+    const traitLabels = (plant.traits ?? [])
+      .concat(plant.inheritedTraits ?? [])
+      .map(t => t.label);
+    const flavor = traitLabels[0] ?? "Garden";
+    const parts = plant.cultivarId.split("×").map(p => {
+      const c = CULTIVARS[plant.species]?.[p];
+      return c?.name ?? p[0].toUpperCase() + p.slice(1);
+    });
+    return `${flavor} ${parts.join("-")}`;
   }
 
   // ── Public game API ────────────────────────────────────────────────────
@@ -785,13 +1242,60 @@ export function initGame(runtime, bundle, seedStr) {
     state,
     EntityType,
 
-    async start() {
-      // Seed initial inventory: a tomato, a bean, a clover, a lavender, a sunflower.
-      for (const sp of ["tomato", "tomato", "bean", "clover", "lavender", "sunflower"]) {
-        const id = makeSeed(state, EntityType, rng, sp, null);
-        state.inventory.push({ id, species: sp });
+    async start(opts = {}) {
+      const save = opts.save ?? null;
+      if (save) {
+        // Continuing a multi-season run. Restore the player's basket,
+        // journal, lineage, and any cultivars they stabilized.
+        state.journal = { ...(save.journal ?? {}) };
+        state.localCultivars = { ...(save.localCultivars ?? {}) };
+        state.hybridStability = { ...(save.hybridStability ?? {}) };
+        state.lineage = { ...(save.lineage ?? {}) };
+        state.season.seasonNumber = save.seasonNumber ?? 1;
+        for (const rec of save.inventory ?? []) {
+          const id = rec.id;
+          state.entities[id] = {
+            entityType: EntityType.Item, id,
+            name: rec.name ?? `${SPECIES[rec.species].name} seed`,
+            species: rec.species, cultivarId: rec.cultivarId ?? defaultCultivarId(rec.species),
+            // Inscriptions reference actions from prior seasons whose entities
+            // no longer exist; drop them. Lineage info is preserved on the
+            // seed's own fields (parentTraits, donorCultivarId, etc.).
+            inscriptions: [],
+            location: "garden",
+            parentSummary: rec.parentSummary ?? null,
+            parentTraits: rec.parentTraits ?? [],
+            donorTraits: rec.donorTraits ?? [],
+            donorCultivarId: rec.donorCultivarId ?? null,
+            parentSeedId: rec.parentSeedId ?? null,
+            donorSeedId: rec.donorSeedId ?? null,
+            generation: rec.generation ?? 1,
+          };
+          state.items.push(id);
+          state.seedIds.push(id);
+          state.inventory.push({ id, species: rec.species });
+        }
+        addLogEntry({ kind: "intro", text: `Season ${state.season.seasonNumber}. Your saved basket is intact.` });
+      } else {
+        // Fresh start. One of each cultivar of the staple crops so the player
+        // can see varietal differences from day one.
+        const starters = [
+          ["tomato", "roma"], ["tomato", "cherry"],
+          ["bean", "bush"],
+          ["clover", "white"],
+          ["lavender", "english"],
+          ["sunflower", "dwarf"],
+        ];
+        for (const [sp, cv] of starters) {
+          const id = makeSeed(state, EntityType, rng, sp, { cultivarId: cv });
+          state.inventory.push({ id, species: sp });
+        }
+        addLogEntry({ kind: "intro", text: "Spring. Your starter basket has a few cultivars to compare. Plant deliberately." });
       }
-      addLogEntry({ kind: "intro", text: "Spring. Your starting seeds are in the basket." });
+    },
+
+    serialize() {
+      return serializeForSave(state);
     },
 
     getState: buildState,
@@ -892,7 +1396,8 @@ export function initGame(runtime, bundle, seedStr) {
       const plot = state.entities[action.plotId];
       if (!plot) throw new Error("invalid plot");
       const fresh = await fireAction("water-plot", gid, { gardener: [gid], plot: [action.plotId] });
-      plot.moisture = clamp(plot.moisture + 35, 0, 100);
+      const sens = plot.hostPlant ? (state.entities[plot.hostPlant].sens?.water ?? 1) : 1;
+      plot.moisture = clamp(plot.moisture + Math.round(35 * sens), 0, 100);
       attributePlot(state, action.plotId, "water");
       for (const a of fresh) events.push({ kind: "player", text: a.gloss, actionId: a.id });
       return fresh[0]?.id ?? null;
@@ -925,10 +1430,47 @@ export function initGame(runtime, bundle, seedStr) {
       if (!plot || !seed) throw new Error("invalid plot/seed");
       if (plot.hostPlant) throw new Error("plot is occupied");
 
+      // Resolve which cultivar this seed becomes — and whether it's a hybrid
+      // (if cross-pollinated last season). A hybrid takes the parent's
+      // cultivar plus the donor's cultivar joined with "×".
+      let cultivarId = seed.cultivarId ?? defaultCultivarId(seed.species);
+      const donorTraits = (seed.donorTraits ?? []).slice(0, 1); // donor contributes 1 trait
+      const inheritedTraits = (seed.parentTraits ?? []).slice(0, 2); // mother contributes up to 2
+      if (seed.donorCultivarId && seed.donorCultivarId !== cultivarId) {
+        // Build the canonical hybrid id (sorted for stability so
+        // "roma×cherry" === "cherry×roma").
+        const parts = [cultivarId, seed.donorCultivarId].sort();
+        cultivarId = parts.join("×");
+      }
+
       // Create the plant entity FIRST so we can precast it into the action.
-      // Inherited traits come from a saved seed's parent (visible badge only
-      // — they don't currently change biology, just preserve lineage).
-      const plantId = makePlant(state, EntityType, rng, seed.species, action.plotId, seed.parentTraits ?? []);
+      const plantId = makePlant(state, EntityType, rng, seed.species, action.plotId, {
+        cultivarId,
+        inheritedTraits,
+        donorTraits,
+        donorCultivarId: seed.donorCultivarId,
+        parentSeedId: seed.id,
+        donorSeedId: seed.donorSeedId,
+        generation: (seed.generation ?? 1),
+      });
+
+      // The planted seed entity persists through the plant's life and is
+      // returned to the basket at go-to-seed (with updated lineage info).
+      // Cross-pollinate, if it fires mid-life, inscribes this same seed.
+      state.entities[plantId].destinedSeedId = seed.id;
+      // Record lineage node so cross-season pedigree walks keep working.
+      state.lineage[plantId] = {
+        id: plantId,
+        species: seed.species,
+        cultivarId,
+        cultivarName: cultivarLabelFor(state, seed.species, cultivarId),
+        plantedDay: state.day,
+        seasonNumber: state.season.seasonNumber ?? 1,
+        parentSeedId: seed.id,
+        donorSeedId: seed.donorSeedId,
+        inheritedTraits, donorTraits,
+        generation: (seed.generation ?? 1),
+      };
 
       const fresh = await fireAction("plant-seed", gid, {
         gardener: [gid],

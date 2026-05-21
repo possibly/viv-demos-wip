@@ -4,7 +4,8 @@ import {
 } from "../../shared/viv-runtime.js";
 import {
   initGame, PLAYER_ACTION_CATALOG, SPECIES, STAGE_LABEL, STAGE_EMOJI,
-  STAGE_ORDER, SEASON_DAYS,
+  STAGE_ORDER, SEASON_DAYS, CULTIVARS, TRAIT_RULES, traitRule,
+  loadSave, saveSave, clearSave,
 } from "./sim.mjs";
 
 const runtime = { initializeVivRuntime, attemptAction, selectAction, tickPlanner, runSiftingPattern, EntityType };
@@ -26,6 +27,15 @@ const selectionBarEl = document.getElementById("selection-bar");
 const logEl          = document.getElementById("log");
 const journalEl      = document.getElementById("journal");
 const outcomeEl      = document.getElementById("outcome");
+const popoverEl      = document.getElementById("popover");
+const modalBackdrop  = document.getElementById("modal-backdrop");
+const modalEl        = document.getElementById("modal");
+const modalContent   = document.getElementById("modal-content");
+const modalClose     = document.getElementById("modal-close");
+
+function escapeHTML(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
 
 function setStatus(msg, isError = false) {
   statusEl.textContent = msg;
@@ -45,14 +55,22 @@ function renderPlots(state) {
     card.className = "plot-card" + (selectedPlot === plot.id ? " selected" : "");
     card.disabled = busy;
     card.innerHTML = renderPlotInner(plot);
-    card.addEventListener("click", () => handlePlotClick(plot.id));
+    card.addEventListener("click", (e) => {
+      const pedTarget = e.target.closest("[data-plant-pedigree]");
+      if (pedTarget) {
+        e.stopPropagation();
+        openPedigreeForPlant(pedTarget.getAttribute("data-plant-pedigree"));
+        return;
+      }
+      handlePlotClick(plot.id);
+    });
     plotsGridEl.appendChild(card);
   }
 }
 
 function renderPlotInner(plot) {
   const host = plot.plant
-    ? `<span class="plot-host">${plot.plant.emoji}</span>`
+    ? `<span class="plot-host" title="${escapeHTML(plot.plant.name)}">${plot.plant.emoji}</span>`
     : `<span class="plot-host empty">(empty)</span>`;
   const stats = [
     ["💧", "moisture", plot.moisture],
@@ -73,9 +91,11 @@ function renderPlotInner(plot) {
     const flags = [];
     flags.push(`<span class="flag${p.pollinated ? " on" : ""}">🐝</span>`);
     if ((plot.pests ?? 0) > 0) flags.push(`<span class="flag on">🐛${plot.pests}</span>`);
+    const cultivar = p.cultivarName ?? "";
+    const hybridMark = p.isHybrid ? `<span class="plot-hybrid" title="Hybrid">×</span>` : "";
     foot = `
       <div class="plot-foot">
-        <span class="plant-stage">${p.stageEmoji} ${p.stageLabel} · ${SPECIES[p.species].name}</span>
+        <span class="plant-stage">${p.stageEmoji} ${p.stageLabel} · ${escapeHTML(cultivar)} ${SPECIES[p.species].name}${hybridMark}</span>
         <span class="plant-flags">${flags.join("")}</span>
       </div>`;
   } else {
@@ -102,6 +122,10 @@ function renderPlotInner(plot) {
     traits = `<div class="plot-traits">${tags}</div>`;
   }
 
+  const lineageLink = (plot.plant && (plot.plant.parentSummary || plot.plant.inheritedTraits?.length || plot.plant.isHybrid))
+    ? `<span class="plot-pedigree-link" data-plant-pedigree="${plot.plant.id}" title="See where this plant came from" role="button" tabindex="0">↳ lineage</span>`
+    : "";
+
   return `
     <div class="plot-head">
       <span class="plot-name">${plot.name}</span>
@@ -111,6 +135,7 @@ function renderPlotInner(plot) {
     ${foot}
     ${traits}
     ${lineage}
+    ${lineageLink}
   `;
 }
 
@@ -123,29 +148,96 @@ function renderBasket(state) {
   for (const seed of state.inventory) {
     const chip = document.createElement("button");
     chip.className = "seed-chip" + (selectedSeed === seed.id ? " selected" : "");
+    if (seed.isHybrid) chip.classList.add("hybrid");
     chip.disabled = busy;
 
-    // Show inherited trait labels right on the chip so the player can pick
-    // a "Sweet" seed deliberately when they want to breed that quality.
     let traitLabels = "";
     if (seed.parentTraits?.length) {
-      traitLabels = `<span class="seed-traits">${seed.parentTraits.map(t => `★ ${t.label}`).join(" · ")}</span>`;
+      traitLabels = `<span class="seed-traits">${seed.parentTraits.map(t => `★ ${escapeHTML(t.label)}`).join(" · ")}</span>`;
     } else if (seed.parentSummary) {
       traitLabels = `<span class="seed-lineage">★ heirloom</span>`;
     }
-    chip.innerHTML = `<span class="seed-emoji">${seed.emoji}</span><span>${SPECIES[seed.species].name}</span>${traitLabels}`;
-
-    const tooltipParts = [SPECIES[seed.species].blurb];
-    if (seed.parentTraits?.length) {
-      tooltipParts.push(...seed.parentTraits.map(t => `★ ${t.label} — ${t.explain}`));
-    } else if (seed.parentSummary) {
-      tooltipParts.push(`Heirloom — last chapter: ${seed.parentSummary.headline}`);
-    }
-    chip.title = tooltipParts.join("\n");
+    const cultivarLabel = seed.cultivarName ? `<span class="seed-cultivar">${escapeHTML(seed.cultivarName)}</span> ` : "";
+    chip.innerHTML = `<span class="seed-emoji">${seed.emoji}</span>${cultivarLabel}<span class="seed-species">${SPECIES[seed.species].name}</span>${traitLabels}`;
 
     chip.addEventListener("click", () => handleSeedClick(seed.id));
+    chip.addEventListener("mouseenter", () => showSeedPopover(chip, seed));
+    chip.addEventListener("focus", () => showSeedPopover(chip, seed));
+    chip.addEventListener("mouseleave", hidePopover);
+    chip.addEventListener("blur", hidePopover);
     basketEl.appendChild(chip);
   }
+}
+
+function showSeedPopover(anchor, seed) {
+  const preview = seed.preview ?? {};
+  const t = preview.t ?? {};
+  const base = preview.base ?? {};
+  const sens = preview.sens ?? { water: 1, rain: 1 };
+  const cultivarName = seed.cultivarName ?? "";
+  const lines = [];
+  if (preview.blurb) lines.push(`<div class="popover-blurb">${escapeHTML(preview.blurb)}</div>`);
+  if (seed.isHybrid) {
+    lines.push(`<div class="popover-hybrid">Hybrid · gen ${seed.generation ?? 1}</div>`);
+  } else if (seed.generation && seed.generation > 1) {
+    lines.push(`<div class="popover-gen">Generation ${seed.generation}</div>`);
+  }
+  // Threshold + sensitivity grid. Show modified value next to base when they
+  // differ — this is the predict-before-planting surface.
+  const rows = [
+    ["Germinate", "moisture ≥", t.g_m, base.g_m],
+    ["Germinate", "warmth ≥",   t.g_w, base.g_w],
+    ["Leaf out",  "nitrogen ≥", t.l_n, base.l_n],
+    ["Flower",    "warmth ≥",   t.f_w, base.f_w],
+    ["Ripen",     "warmth ≥",   t.r_w, base.r_w],
+  ].filter(([,, v]) => v != null).map(([phase, label, v, b]) => {
+    const baseStr = (b != null && b !== v) ? ` <span class="popover-base">(base ${b})</span>` : "";
+    return `<div class="popover-row"><span class="popover-phase">${phase}</span><span class="popover-label">${label}</span><span class="popover-val">${v}${baseStr}</span></div>`;
+  }).join("");
+
+  const sensRows = [];
+  if (sens.water !== 1) sensRows.push(`<div class="popover-row"><span class="popover-phase">Watering</span><span class="popover-label">absorbs</span><span class="popover-val">${Math.round(sens.water * 100)}%</span></div>`);
+  if (sens.rain !== 1) sensRows.push(`<div class="popover-row"><span class="popover-phase">Rain</span><span class="popover-label">absorbs</span><span class="popover-val">${Math.round(sens.rain * 100)}%</span></div>`);
+  if (preview.pestResist) sensRows.push(`<div class="popover-row"><span class="popover-phase">Pests</span><span class="popover-label">resist</span><span class="popover-val">${preview.pestResist > 0 ? "+" : ""}${Math.round(preview.pestResist * 100)}%</span></div>`);
+
+  const traitsSection = seed.parentTraits?.length
+    ? `<div class="popover-traits"><div class="popover-section-head">Inherited from parent</div>${seed.parentTraits.map(t => `<div class="popover-trait">★ <strong>${escapeHTML(t.label)}</strong> — ${escapeHTML(t.explain)}</div>`).join("")}</div>`
+    : "";
+  const donorSection = seed.donorTraits?.length
+    ? `<div class="popover-traits"><div class="popover-section-head">From cross with ${escapeHTML(seed.donorCultivarName ?? "")}</div>${seed.donorTraits.map(t => `<div class="popover-trait">✦ <strong>${escapeHTML(t.label)}</strong> — ${escapeHTML(t.explain)}</div>`).join("")}</div>`
+    : "";
+  const pedigreeBtn = (seed.parentSeedId || seed.parentTraits?.length || seed.parentSummary)
+    ? `<button class="popover-pedigree-btn" data-seed-pedigree="${seed.id}">View lineage</button>`
+    : "";
+
+  popoverEl.innerHTML = `
+    <div class="popover-head">${seed.emoji} <strong>${escapeHTML(cultivarName)}</strong> ${escapeHTML(SPECIES[seed.species].name)}</div>
+    ${lines.join("")}
+    <div class="popover-grid">${rows}${sensRows.join("")}</div>
+    ${traitsSection}
+    ${donorSection}
+    ${pedigreeBtn}
+  `;
+  positionPopover(anchor);
+  popoverEl.hidden = false;
+  popoverEl.querySelector("[data-seed-pedigree]")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    hidePopover();
+    openPedigreeForSeed(seed.id);
+  });
+}
+
+function positionPopover(anchor) {
+  const r = anchor.getBoundingClientRect();
+  const top = Math.max(8, r.bottom + 6 + window.scrollY);
+  // Try right of anchor; fall back to clamped to viewport.
+  const left = Math.min(window.innerWidth - 280 - 8, Math.max(8, r.left));
+  popoverEl.style.top = `${top}px`;
+  popoverEl.style.left = `${left}px`;
+}
+
+function hidePopover() {
+  popoverEl.hidden = true;
 }
 
 function renderSelection(state) {
@@ -208,11 +300,24 @@ function renderActions(state) {
 
 function renderJournal(state) {
   journalEl.innerHTML = "";
+
+  // New-cultivar banners come first — these are the breeding-payoff moments.
+  if (state.newCultivars?.length) {
+    for (const nc of state.newCultivars) {
+      const banner = document.createElement("div");
+      banner.className = "journal-new-cultivar";
+      banner.innerHTML = `<strong>New cultivar stabilized:</strong> ${escapeHTML(nc.name)} ${escapeHTML(SPECIES[nc.species].name)} — after three generations of consistent trait inheritance.`;
+      journalEl.appendChild(banner);
+    }
+  }
+
   if (!state.journal.length) {
-    journalEl.innerHTML = `<div class="journal-empty">No traits observed yet. Plants get traits when they ripen — try planting clover next to a tomato, or mulching a plot, or letting rain do the watering, and see what changes.</div>`;
+    const empty = document.createElement("div");
+    empty.className = "journal-empty";
+    empty.textContent = "No traits observed yet. Plants get traits when they ripen — try planting clover next to a tomato, or mulching a plot, or letting rain do the watering, and see what changes.";
+    journalEl.appendChild(empty);
     return;
   }
-  // Group entries by species for readability.
   const bySpecies = {};
   for (const j of state.journal) (bySpecies[j.species] ??= []).push(j);
   const speciesOrder = Object.keys(bySpecies).sort();
@@ -223,9 +328,11 @@ function renderJournal(state) {
     for (const entry of bySpecies[sp]) {
       const row = document.createElement("div");
       row.className = "journal-row";
+      const rule = traitRule(entry.traitId);
+      const inheritText = rule?.inheritExplain ? `<div class="journal-inherit">↳ ${escapeHTML(rule.inheritExplain)}</div>` : "";
       row.innerHTML = `
-        <span class="journal-trait">${entry.label}</span>
-        <span class="journal-explain">${entry.explain}</span>
+        <span class="journal-trait">${escapeHTML(entry.label)}</span>
+        <span class="journal-explain">${escapeHTML(entry.explain)}${inheritText}</span>
         <span class="journal-count">×${entry.count} · first d${entry.firstSeenDay}</span>
       `;
       block.appendChild(row);
@@ -315,6 +422,9 @@ async function showOutcome() {
   const sifting = await game.runSifting();
   setStatus("");
 
+  // Persist the next-season save. New cultivars and traits carry forward.
+  saveSave(game.serialize());
+
   outcomeEl.hidden = false;
   const a = sifting.archetype;
   const scoreRows = (a.ranked ?? []).map(r => {
@@ -336,6 +446,11 @@ async function showOutcome() {
     return `${name}: ${match ? "match" : "no match"}`;
   }).join("  ·  ");
 
+  const state = game.getState();
+  const seedsToCarry = state.inventory.length;
+  const cultivarLabels = Object.values(state.localCultivars ?? {}).map(c => `★ ${escapeHTML(c.name)}`).join("  ·  ");
+  const stableLine = cultivarLabels ? `<div class="outcome-stable">Stable strains: ${cultivarLabels}</div>` : "";
+
   outcomeEl.innerHTML = `
     <div class="outcome-icon">🌾</div>
     <div class="outcome-title">${a.title}</div>
@@ -346,14 +461,25 @@ async function showOutcome() {
       <span>${sifting.stats.harvested} harvested</span>
       <span>${sifting.stats.totalActions} chronicle entries</span>
     </div>
+    ${stableLine}
     <div class="outcome-viv">viv sifting patterns &nbsp;${vivBits}</div>
-    <button class="outcome-button" id="play-again">Plant another season</button>
+    <div class="outcome-buttons">
+      <button class="outcome-button" id="play-again">Plant another season (${seedsToCarry} seeds)</button>
+      <button class="outcome-button secondary" id="burn-journal">Burn the journal &amp; start fresh</button>
+    </div>
   `;
-  document.getElementById("play-again").addEventListener("click", () => startGame());
+  document.getElementById("play-again").addEventListener("click", () => startGame({ continueRun: true }));
+  document.getElementById("burn-journal").addEventListener("click", () => {
+    if (!confirm("Burn the journal? You'll lose your saved seeds, journal, and stabilized cultivars.")) return;
+    clearSave();
+    startGame({ continueRun: false });
+  });
 }
 
-async function startGame() {
+async function startGame(opts = {}) {
   outcomeEl.hidden = true;
+  hidePopover();
+  closeModal();
   logEl.innerHTML = "";
   selectedPlot = null;
   selectedSeed = null;
@@ -362,7 +488,8 @@ async function startGame() {
   try {
     const seed = `rootwork-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     game = initGame(runtime, bundle, seed);
-    await game.start();
+    const save = opts.continueRun !== false ? loadSave() : null;
+    await game.start({ save });
     setStatus("");
     renderAll();
   } catch (err) {
@@ -370,6 +497,122 @@ async function startGame() {
     console.error(err);
   }
 }
+
+// ── Pedigree modal ─────────────────────────────────────────────────────────
+
+function openPedigreeForPlant(plantId) {
+  const state = game.getState();
+  const plant = state.plants.find(p => p.id === plantId);
+  if (!plant) return;
+  const nodes = buildPedigreeFromPlant(state, plant);
+  showPedigreeModal(`${plant.cultivarName ?? ""} ${SPECIES[plant.species].name}`, nodes);
+}
+
+function openPedigreeForSeed(seedId) {
+  const state = game.getState();
+  const seed = state.inventory.find(s => s.id === seedId);
+  if (!seed) return;
+  const nodes = buildPedigreeFromSeed(state, seed);
+  showPedigreeModal(`${seed.cultivarName ?? ""} ${SPECIES[seed.species].name} seed`, nodes);
+}
+
+// Walk the lineage records (populated as plants are planted) to build a
+// vertical tree from the current plant/seed back to its earliest known
+// ancestor. The lineage map persists across season resets via localStorage.
+function buildPedigreeFromPlant(state, plant) {
+  const lineage = state.lineage ?? {};
+  const nodes = [currentNode(plant, state)];
+  // Walk back: this plant was grown from parentSeedId; that seed was
+  // produced by an earlier plant whose lineage entry has producedSeedId
+  // matching. Hop seed → plant → seed → plant across seasons.
+  let parentSeedId = lineage[plant.id]?.parentSeedId ?? plant.parentSeedId ?? null;
+  let depth = 0;
+  while (parentSeedId && depth < 10) {
+    const ancestor = Object.values(lineage).find(n => n.producedSeedId === parentSeedId);
+    if (!ancestor) break;
+    nodes.push(lineageNode(ancestor));
+    parentSeedId = ancestor.parentSeedId;
+    depth++;
+  }
+  return nodes;
+}
+
+function buildPedigreeFromSeed(state, seed) {
+  const lineage = state.lineage ?? {};
+  const nodes = [{
+    title: `Seed: ${seed.cultivarName ?? ""} ${SPECIES[seed.species].name}`,
+    subtitle: seed.isHybrid ? `Hybrid · gen ${seed.generation ?? 1}` : `Generation ${seed.generation ?? 1}`,
+    traits: seed.parentTraits ?? [],
+    donorTraits: seed.donorTraits ?? [],
+    donorCultivarName: seed.donorCultivarName,
+  }];
+  // Find the plant that produced this seed (its lineage.producedSeedId).
+  let curSeedId = seed.id;
+  let depth = 0;
+  while (curSeedId && depth < 10) {
+    const producer = Object.values(lineage).find(n => n.producedSeedId === curSeedId);
+    if (!producer) break;
+    nodes.push(lineageNode(producer));
+    curSeedId = producer.parentSeedId;
+    depth++;
+  }
+  return nodes;
+}
+
+function lineageNode(rec) {
+  return {
+    title: `${rec.cultivarName ?? ""} ${SPECIES[rec.species].name}`,
+    subtitle: `Season ${rec.seasonNumber ?? 1} · gen ${rec.generation ?? 1}`,
+    traits: rec.inheritedTraits ?? [],
+    donorTraits: rec.donorTraits ?? [],
+    earnedTraits: rec.earnedTraits ?? [],
+  };
+}
+
+function currentNode(plant, state) {
+  return {
+    title: `${plant.cultivarName ?? ""} ${SPECIES[plant.species].name} (currently in ${state.plots.find(pl => pl.id === plant.location)?.name ?? plant.location})`,
+    subtitle: `${plant.stageLabel} · gen ${plant.generation ?? 1}${plant.isHybrid ? " · hybrid" : ""}`,
+    traits: plant.inheritedTraits ?? [],
+    donorTraits: plant.donorTraits ?? [],
+    earnedTraits: plant.traits ?? [],
+  };
+}
+
+function showPedigreeModal(title, nodes) {
+  const body = nodes.length === 0
+    ? `<div class="pedigree-empty">No earlier ancestors recorded.</div>`
+    : nodes.map((n, i) => renderPedigreeNode(n, i, i === nodes.length - 1)).join('<div class="pedigree-arrow">↑</div>');
+  modalContent.innerHTML = `
+    <div class="modal-title">Lineage: ${escapeHTML(title)}</div>
+    <div class="pedigree">${body}</div>
+  `;
+  modalBackdrop.hidden = false;
+}
+
+function renderPedigreeNode(n, idx, isOldest) {
+  const traits = (n.traits ?? []).map(t => `<span class="trait-tag inherited">★ ${escapeHTML(t.label)}</span>`).join("");
+  const donor = (n.donorTraits ?? []).map(t => `<span class="trait-tag donor">✦ ${escapeHTML(t.label)}</span>`).join("");
+  const earned = (n.earnedTraits ?? []).map(t => `<span class="trait-tag earned">${escapeHTML(t.label)}</span>`).join("");
+  const donorBlock = donor ? `<div class="pedigree-traits"><span class="pedigree-label">cross with ${escapeHTML(n.donorCultivarName ?? "another cultivar")}:</span> ${donor}</div>` : "";
+  return `
+    <div class="pedigree-node${isOldest ? " oldest" : ""}${idx === 0 ? " current" : ""}">
+      <div class="pedigree-node-title">${escapeHTML(n.title)}</div>
+      ${n.subtitle ? `<div class="pedigree-node-sub">${escapeHTML(n.subtitle)}</div>` : ""}
+      ${earned ? `<div class="pedigree-traits"><span class="pedigree-label">earned:</span> ${earned}</div>` : ""}
+      ${traits ? `<div class="pedigree-traits"><span class="pedigree-label">inherited:</span> ${traits}</div>` : ""}
+      ${donorBlock}
+    </div>
+  `;
+}
+
+function closeModal() {
+  modalBackdrop.hidden = true;
+}
+
+modalClose.addEventListener("click", closeModal);
+modalBackdrop.addEventListener("click", (e) => { if (e.target === modalBackdrop) closeModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeModal(); hidePopover(); } });
 
 async function init() {
   setStatus("Loading bundle…");
