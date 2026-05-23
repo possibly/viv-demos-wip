@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Viv IDE</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="back" href="../../">← demos</a>
+    <h1>Viv <span class="accent">IDE</span></h1>
+    <div class="topbar-right">
+      <span id="server-status" class="server-status" title="compile server status">checking…</span>
+    </div>
+  </header>
+
+  <main class="ide">
+    <!-- ── Editor ──────────────────────────────────────────────────────── -->
+    <section class="pane editor-pane">
+      <div class="toolbar">
+        <label class="field">seed
+          <input id="seed" type="text" value="alpha" spellcheck="false" autocomplete="off">
+        </label>
+        <label class="field">ticks
+          <input id="ticks" type="number" value="60" min="1" max="300" step="1">
+        </label>
+        <button id="btn-run" class="primary">Compile &amp; Run</button>
+        <button id="btn-compile">Compile</button>
+        <button id="btn-reset" class="ghost" title="restore the default program">reset</button>
+      </div>
+
+      <div class="editor-wrap">
+        <pre id="editor-highlight" aria-hidden="true"><code></code></pre>
+        <textarea id="editor-input" spellcheck="false" autocapitalize="off"
+                  autocomplete="off" autocorrect="off" wrap="off"
+                  placeholder="// write Viv source here…"></textarea>
+      </div>
+
+      <div id="diagnostics" class="diagnostics" data-kind="info">ready.</div>
+    </section>
+
+    <!-- ── Results ─────────────────────────────────────────────────────── -->
+    <section class="pane results-pane">
+
+      <!-- Snapshots + chronicle -->
+      <div class="card" id="snapshots-card">
+        <div class="card-h">
+          <span>Snapshots</span>
+          <span id="run-meta" class="card-meta"></span>
+        </div>
+        <div class="scrub-row">
+          <button id="btn-start" class="mini" title="first tick">⏮</button>
+          <button id="btn-prev" class="mini" title="previous tick">◀</button>
+          <input id="scrubber" type="range" min="0" max="0" value="0" step="1">
+          <button id="btn-next" class="mini" title="next tick">▶</button>
+          <button id="btn-end" class="mini" title="last tick">⏭</button>
+        </div>
+        <div class="scrub-info">
+          <span id="tick-label">tick 000 / 0</span>
+          <span id="tick-time">T=0</span>
+          <span id="total-actions">events: 0</span>
+        </div>
+        <div class="snap-grid">
+          <div class="snap-col">
+            <div class="col-h">Chronicle — this tick</div>
+            <div id="events" class="events"></div>
+          </div>
+          <div class="snap-col">
+            <div class="col-h">World state</div>
+            <div id="state" class="state"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Causal tree -->
+      <div class="card" id="causal-card">
+        <div class="card-h">
+          <span>Causal tree</span>
+          <span id="causal-meta" class="card-meta"></span>
+        </div>
+        <div class="hint">Click any action in the chronicle to trace its causal lineage (<code>constructTreeDiagram</code>).</div>
+        <div id="causal-diagram" class="diagram-card empty">— no action selected —</div>
+      </div>
+
+      <!-- Sifting -->
+      <div class="card" id="sifting-card">
+        <div class="card-h">
+          <span>Sifting patterns</span>
+          <button id="btn-run-all" class="mini">run all</button>
+        </div>
+        <div class="hint">Patterns compiled from the source above. Run one to sift the whole chronicle and render its <code>constructSiftingMatchDiagram</code> tree. Edit a pattern, then <strong>Compile &amp; Run</strong> to apply.</div>
+        <div id="pattern-list" class="pattern-list"></div>
+      </div>
+
+    </section>
+  </main>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

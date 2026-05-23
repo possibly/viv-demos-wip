@@ -20,6 +20,8 @@ Each demo has a `sim.viv` (Viv source) compiled to `bundle.json` via `vivc`. At 
 - `make runtime` — rebuild `shared/viv-runtime.js` from `viv/`
 - `node scripts/run-sim.mjs <demo> [ticks] [seed]` — run a demo headlessly in Node, print tick-by-tick output. Use this to test `.viv` changes without a browser.
 - `node scripts/test-web.mjs [actions...]` — Playwright test that serves the demo over HTTP and drives it in headless Chromium, simulating button clicks and asserting Jordan responds each turn. Use this to catch browser-runtime bugs that the Node runner won't surface.
+- `node scripts/ide-server.mjs` (or `make ide`) — dev server for the `ide` demo: serves the repo statically and exposes `POST /compile`, which shells out to `vivc` so the browser can compile user-authored `.viv`. The `ide` demo needs this for live compilation; the rest of the demos are pure static.
+- `node scripts/test-ide.mjs` — Playwright test for the `ide` demo: spawns the compile server, then drives compile → run → scrub → causal tree → sifting in headless Chromium.
 
 ## Demo convention
 

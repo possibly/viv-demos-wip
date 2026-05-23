@@ -9,8 +9,17 @@ Browser demos for the [Viv](https://github.com/siftystudio/viv) emergent-narrati
 - **promweek** - promweek remake focused on viv integration
 - **causal-actions** — Pynchonian gnarl with three sifting patterns over the chronicle
 - **rootwork** — garden game; plants run multi-phase life plans, you and nature both satisfy the conditions
+- **ide** — a web IDE for Viv: write source, compile, generate snapshots, scrub the chronicle, trace causal trees, and run sifting patterns
 
 Open `index.html` to browse them, or view them on GitHub Pages.
+
+The **ide** demo additionally needs a local compile server (the browser can't run the Python compiler):
+
+```
+node scripts/ide-server.mjs            # serves the repo + a /compile endpoint on :8080
+```
+
+Then open <http://localhost:8080/demos/ide/>. Without it the IDE still loads (snapshots, scrubbing, causal trees, and sifting all work against the checked-in bundle); only live recompilation is disabled.
 
 ## Dev setup
 

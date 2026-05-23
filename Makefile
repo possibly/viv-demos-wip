@@ -1,4 +1,4 @@
-.PHONY: runtime compile serve
+.PHONY: runtime compile serve ide
 
 runtime:
 	cd viv && npm ci && npm run build --workspace=runtimes/js
@@ -11,3 +11,6 @@ compile:
 
 serve:
 	python3 -m http.server 8080
+
+ide:
+	node scripts/ide-server.mjs

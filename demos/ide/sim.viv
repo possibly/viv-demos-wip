@@ -1,0 +1,385 @@
+// ────────────────────────────────────────────────────────────────────────────
+// A SOCIAL DRAMA — the default program in the Viv IDE.
+//
+// Six people drift between the café, the park, the office, and the station.
+// They chat, share rumours, slip notes, post notices, and mail dossiers. The
+// world's reactions deliberately grow long causal chains that converge on the
+// same paranoid climaxes: a suspicion, a confrontation, a flight.
+//
+// Edit this source, hit COMPILE & RUN to generate snapshots, scrub the
+// chronicle, click any action to see its causal tree, then run the sifting
+// patterns at the bottom to rake the chronicle for story shapes.
+//
+// The host world gives every character these numeric stats (all start small):
+//   mood paranoia trust suspicion affection anger fear joy resolve energy
+// and a handful of inscribable items (a letter, a note, a dossier, a notice
+// board, a photograph). Two characters start on-edge so climaxes can fire.
+// ────────────────────────────────────────────────────────────────────────────
+
+
+// ── Mundane background ───────────────────────────────────────────────────────
+
+action chat:
+    gloss: "@speaker makes small talk with @other"
+    tags: mundane
+    roles:
+        @speaker:
+            as: initiator
+        @other:
+            as: recipient
+    effects:
+        @speaker.mood += 2
+        @other.mood += 2
+
+
+// ── Rumour lineage ───────────────────────────────────────────────────────────
+
+action share-rumour:
+    gloss: "@speaker shares a rumour with @confidant"
+    tags: gossip
+    roles:
+        @speaker:
+            as: initiator
+        @confidant:
+            as: recipient
+    effects:
+        @confidant.paranoia += 5
+    reactions:
+        queue action overhear:
+            with:
+                @listener: @confidant
+                @source: @speaker
+            time:
+                between: 0 minutes and 3 minutes from action
+
+reserved action overhear:
+    gloss: "@listener overhears @source"
+    tags: gossip, surveillance
+    roles:
+        @listener:
+            as: initiator
+        @source:
+            as: bystander
+    conditions:
+        @listener.paranoia >= 30
+    effects:
+        @listener.paranoia += 6
+    reactions:
+        // Pass the rumour back — the cascade.
+        queue action share-rumour:
+            with:
+                @speaker: @listener
+                @confidant: @source
+            time:
+                between: 1 minutes and 3 minutes from action
+        // If paranoid enough, confront the source.
+        queue action confront:
+            with:
+                @accuser: @listener
+                @accused: @source
+            abandon:
+                @listener.paranoia < 55
+            time:
+                between: 0 minutes and 5 minutes from action
+
+
+// ── Letter / inscription lineage ─────────────────────────────────────────────
+
+action slip-note:
+    gloss: "@sender slips @note to @receiver"
+    tags: letters, intrigue
+    roles:
+        @sender:
+            as: initiator
+        @receiver:
+            as: recipient
+        @note:
+            as: item
+    effects:
+        @note.mentions = @receiver
+        @note inscribe @this
+    reactions:
+        queue action read-letter:
+            with:
+                @reader: @receiver
+                @letter: @note
+            time:
+                between: 5 minutes and 20 minutes from action
+
+reserved action read-letter:
+    gloss: "@reader pores over @letter"
+    tags: letters, intrigue
+    roles:
+        @reader:
+            as: initiator
+        @letter:
+            as: item
+    effects:
+        @reader inspect @letter
+    reactions:
+        queue action suspect-identity:
+            with partial:
+                @suspector: @reader
+                @suspected: @letter.mentions
+            urgent: false
+            time:
+                between: 1 minutes and 4 minutes from action
+
+action mail-dossier:
+    gloss: "@sender mails @dossier to @target"
+    tags: letters, intrigue
+    roles:
+        @sender:
+            as: initiator
+        @target:
+            as: recipient
+        @dossier:
+            as: item
+    effects:
+        @dossier.mentions = @target
+        @dossier inscribe @this
+    reactions:
+        queue plan intrigue-plot:
+            with:
+                @sender: @sender
+                @target: @target
+                @parcel: @dossier
+                @triggering: @this
+
+
+// ── Notice lineage ───────────────────────────────────────────────────────────
+
+action post-notice:
+    gloss: "@poster pins a notice to @board"
+    tags: intrigue, notice
+    roles:
+        @poster:
+            as: initiator
+        @board:
+            as: item
+    effects:
+        @board inscribe @this
+    reactions:
+        queue action read-notice:
+            with:
+                @reader: @poster
+                @board: @board
+            time:
+                between: 0 minutes and 12 minutes from action
+
+reserved action read-notice:
+    gloss: "@reader studies the notices on @board"
+    tags: intrigue, notice
+    roles:
+        @reader:
+            as: initiator
+        @board:
+            as: item
+    effects:
+        @reader inspect @board
+        @reader.paranoia += 4
+    reactions:
+        queue action confront:
+            with partial:
+                @accuser: @reader
+            abandon:
+                @reader.paranoia < 40
+            time:
+                between: 0 minutes and 6 minutes from action
+
+
+// ── Paranoid climaxes ────────────────────────────────────────────────────────
+
+reserved action suspect-identity:
+    gloss: "@suspector takes @actual for @suspected"
+    tags: suspicion, climactic
+    roles:
+        @suspector:
+            as: initiator
+        @actual:
+            as: recipient
+        @suspected:
+            as: bystander
+    conditions:
+        @actual != @suspected
+        @suspector != @suspected
+    effects:
+        @suspector.target_id = @suspected
+        @suspector.paranoia += 6
+    reactions:
+        queue action confront:
+            with:
+                @accuser: @suspector
+                @accused: @suspected
+            priority: @suspector.paranoia
+
+reserved action confront:
+    gloss: "@accuser confronts @accused"
+    tags: confrontation, climactic
+    roles:
+        @accuser:
+            as: initiator
+        @accused:
+            as: recipient
+        @triggering:
+            as: action, anywhere
+            from: []
+            n: 0-1
+    effects:
+        @accuser.paranoia += 8
+        @accused.paranoia += 12
+    reactions:
+        queue action flee:
+            with:
+                @fleer: @accused
+            abandon:
+                @accused.paranoia < 60
+            time:
+                between: 0 minutes and 4 minutes from action
+
+reserved action flee:
+    gloss: "@fleer bolts for the station"
+    tags: escape, climactic
+    roles:
+        @fleer:
+            as: initiator
+    effects:
+        @fleer.paranoia += 4
+
+
+// ── The plan: intrigue-plot ──────────────────────────────────────────────────
+//
+// Queued by mail-dossier. It runs a rumour, an interception of the dossier, and
+// a final confrontation that precasts the original mail-dossier action into the
+// @triggering role — a causal edge that does NOT pass through the normal
+// reaction chain. In a sifting-match diagram this shows up as a convergence.
+
+plan intrigue-plot:
+    roles:
+        @sender:
+            as: character
+        @target:
+            as: character
+        @parcel:
+            as: item
+        @triggering:
+            as: action, anywhere
+            from: []
+    phases:
+        >rumour-phase:
+            queue action share-rumour:
+                with:
+                    @speaker: @sender
+                    @confidant: @target
+        >interception-phase:
+            queue action read-letter:
+                with:
+                    @reader: @target
+                    @letter: @parcel
+        >confrontation-phase:
+            queue action confront:
+                with:
+                    @accuser: @sender
+                    @accused: @target
+                    @triggering: @triggering
+
+
+// ── Queries ──────────────────────────────────────────────────────────────────
+
+query rumours:
+    action:
+        any: share-rumour
+
+query letter-sending:
+    action:
+        any: slip-note, mail-dossier
+
+query letter-reading:
+    action:
+        any: read-letter
+
+query notice-posting:
+    action:
+        any: post-notice
+
+query notice-reading:
+    action:
+        any: read-notice
+
+query climaxes:
+    action:
+        any: suspect-identity, confront, flee
+
+query suspicions:
+    action:
+        any: suspect-identity
+
+query confrontations:
+    action:
+        any: confront
+
+query flights:
+    action:
+        any: flee
+
+
+// ── Sifting patterns ─────────────────────────────────────────────────────────
+
+// A notice-reading lineage AND a letter-conspiracy lineage that both converge
+// on the same paranoid climax. The diagram shows a convergence indicator
+// (─┼ ⋮ or [⋯id] ⋮) where the two lineages meet.
+pattern betrayal-arc:
+    actions:
+        @notice:
+            from: search query notice-posting:
+                over: inherit
+        @read:
+            from: search query notice-reading:
+                over: inherit
+        @send:
+            from: search query letter-sending:
+                over: inherit
+        @intercept:
+            from: search query letter-reading:
+                over: inherit
+        @climax:
+            from: search query climaxes:
+                over: inherit
+    conditions:
+        @notice triggered @read
+        @send triggered @intercept
+        @intercept caused @climax
+        @read preceded @climax
+
+// A tight three-node chain via `triggered` (immediate parentage). The diagram
+// is compact and easy to read.
+pattern panicked-flight:
+    actions:
+        @suspicion:
+            from: search query suspicions:
+                over: inherit
+        @confront:
+            from: search query confrontations:
+                over: inherit
+        @flee:
+            from: search query flights:
+                over: inherit
+    conditions:
+        @suspicion triggered @confront
+        @confront triggered @flee
+
+// Several rumours feeding a single confrontation. The diagram is visually dense
+// with converging arrows.
+pattern whisper-cascade:
+    actions:
+        @whispers*:
+            from: search query rumours:
+                over: inherit
+            n: 2-3
+        @climax:
+            from: search query confrontations:
+                over: inherit
+    conditions:
+        loop @whispers* as _@w:
+            _@w caused @climax
+        end
